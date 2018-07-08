@@ -17,7 +17,7 @@ buildType "better-c-release" {
 
 configuration "library" {
 	targetType "library"
-	# use default or user specific mir-lapack sub-configuration
+	# default or user specified mir-lapack sub-configuration is used
 }
 
 configuration "unittest" {
