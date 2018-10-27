@@ -458,8 +458,7 @@ unittest
         },
     )(taskPool);
 
-    import std.conv;
-    assert(nrm2((lm.x - [1, 1].sliced).slice) < 1e-8, nrm2((lm.x - [1, 1].sliced).slice).to!string);
+    assert(nrm2((lm.x - [1, 1].sliced).slice) < 1e-6);
 }
 
 /// Rosenbrock
