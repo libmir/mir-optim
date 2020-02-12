@@ -6,7 +6,8 @@ mir_algorithm_dep = dependency('mir-algorithm', fallback : ['mir-algorithm', 'mi
 mir_blas_dep = dependency('mir-blas', fallback : ['mir-blas', 'mir_blas_dep'])
 mir_core_dep = dependency('mir-core', fallback : ['mir-core', 'mir_core_dep'])
 mir_lapack_dep = dependency('mir-lapack', fallback : ['mir-lapack', 'mir_lapack_dep'])
-mir_random_dep = dependency('mir-random', fallback : ['mir-random', 'mir_random_dep'])
+mir_random_dep = dependency('mir-random', fallback : ['mir-random', 'mir_random_dep'], default_options : ['extended=true'])
+osqp_dep = dependency('osqp', fallback : ['osqp', 'osqp_dep'], default_options : 'DLONG=true')
 
 required_deps = [
     cblas_d_dep,
@@ -16,6 +17,7 @@ required_deps = [
     mir_core_dep,
     mir_lapack_dep,
     mir_random_dep,
+    osqp_dep,
 ]
 
 if target_machine.system() == 'linux'
@@ -35,6 +37,7 @@ mir_optim_lib = library(meson.project_name(),
     install: true,
     version: meson.project_version(),
     dependencies: required_deps,
+    d_module_versions: ['mir_test', 'DLONG'],
 )
 
 mir_optim_dep = declare_dependency(
@@ -64,7 +67,7 @@ if get_option('with_test')
         mir_optim_src,
         include_directories: mir_optim_dir,
         d_unittest: true,
-        d_module_versions: ['mir_test'],
+        d_module_versions: ['mir_test', 'DLONG'],
         link_args: '-main',
         dependencies: required_deps,
     )

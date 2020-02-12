@@ -13,7 +13,7 @@ module mir.optim.least_squares;
 import mir.ndslice.slice: Slice, SliceKind, Contiguous;
 import std.meta;
 import std.traits;
-
+  
 public import std.typecons: Flag, Yes, No;
 
 ///
@@ -306,8 +306,10 @@ struct LeastSquaresLM(T)
 
         this.m = m;
         this.n = n;
-        _lower_ptr = lowerBounds ? [n].uninitSlice!T._iterator : null;
-        _upper_ptr = upperBounds ? [n].uninitSlice!T._iterator : null;
+        _lower_ptr = [n].uninitSlice!T._iterator;
+        _upper_ptr = [n].uninitSlice!T._iterator;
+        lower[] = -T.infinity;
+        upper[] = +T.infinity;
         _ipiv_ptr = [n].uninitSlice!lapackint._iterator;
         _x_ptr = [n].uninitAlignedSlice!T(alignment)._iterator;
         _deltaX_ptr = [n].uninitAlignedSlice!T(alignment)._iterator;
@@ -337,8 +339,10 @@ struct LeastSquaresLM(T)
 
         this.m = m;
         this.n = n;
-        _lower_ptr = lowerBounds ? [n].stdcUninitSlice!T._iterator : null;
-        _upper_ptr = upperBounds ? [n].stdcUninitSlice!T._iterator : null;
+        _lower_ptr = [n].stdcUninitSlice!T._iterator;
+        _upper_ptr = [n].stdcUninitSlice!T._iterator;
+        lower[] = -T.infinity;
+        upper[] = +T.infinity;
         _ipiv_ptr = [n].stdcUninitSlice!lapackint._iterator;
         _x_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
         _deltaX_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
@@ -534,7 +538,7 @@ unittest
     lm.optimize!(rosenbrockRes, rosenbrockJac);
 
     // writeln(lm.iterCt, " ", lm.fCalls, " ", lm.gCalls);
-    // assert(nrm2((lm.x - [10, 100].sliced).slice) < 1e-8);
+    assert(nrm2((lm.x - [10, 100].sliced).slice) < 1e-5);
     assert(lm.x.all!"a >= 10");
 }
 
@@ -920,7 +924,7 @@ extern(C) @safe nothrow @nogc
         m = Y = f(X) dimension
         n = X dimension
         lowerBounds = flag to allocate lower bounds
-        lowerBounds = flag to allocate upper bounds
+        upperBounds = flag to allocate upper bounds
     +/
     void mir_least_squares_lm_stdc_alloc_d(ref LeastSquaresLM!double lm, size_t m, size_t n, bool lowerBounds, bool upperBounds)
     {
@@ -1173,8 +1177,8 @@ L_conservative:
         if (nBuffer.front + sigmaInit < T.epsilon)
             sigmaInit += T.epsilon;
 
-        if (!(mJy_nrm2 / ((nBuffer.front + sigmaInit) * (1 + lambda)) < T.max / 2))
-            sigmaInit = mJy_nrm2 / ((T.max / 2) * (1 + lambda)) - nBuffer.front;
+        if (!(mJy_nrm2 / ((nBuffer.front + sigmaInit) * (1 + lambda)) < 0.5f * T.max))
+            sigmaInit = mJy_nrm2 / ((0.5f * T.max) * (1 + lambda)) - nBuffer.front;
         
         if (sigmaInit == 0)
         {
@@ -1213,10 +1217,95 @@ L_conservative:
             assumePure(&fprintf)(file, "\n");
         }
 
+        bool needsOSQP;
         if (_lower_ptr)
-            applyLowerBound(deltaX, lower);
+            needsOSQP = applyLowerBound(deltaX, lower) || needsOSQP;
         if (_upper_ptr)
-            applyUpperBound(deltaX, upper);
+            needsOSQP = applyUpperBound(deltaX, upper) || needsOSQP;
+
+        if (needsOSQP)
+        {
+            import mir.algorithm.iteration;
+            import mir.ndslice.topology;
+            import mir.rc.array;
+
+            // OSQP
+            import auxil;
+            import constants;
+            import cs;
+            import osqp;
+            import types;
+
+            JJ[] = 0;
+            import mir.math;
+            syrk(Uplo.Lower, 2, J.transposed, 0, JJ);
+            JJ.diagonal[] += sigma;
+            if (conservative)
+                JJ.diagonal[] += lambda;
+            else
+                JJ.diagonal[] *= (1 + lambda);
+            auto nnz = n * n; // JJ.count!"a";
+
+            auto A_x = RCArray!double(n);
+            auto A_i = RCArray!long(n);
+            auto A_p = RCArray!long(n + 1);
+            auto P_x = RCArray!double(nnz);
+            auto P_i = RCArray!long(nnz);
+            auto P_p = RCArray!long(n + 1);
+            auto q = RCArray!double(n);
+            auto lb = RCArray!double(n);
+            auto ub = RCArray!double(n);
+
+            A_x[][] = 1;
+            A_i[].sliced[] = n.iota;
+            A_p[].sliced[] = (n + 1).iota;
+            q[].sliced[] = -mJy;
+            lb[].sliced[] = lower - x;
+            ub[].sliced[] = upper - x;
+
+            size_t nzc;
+            P_p[0] = 0;
+            foreach(i; 0 .. n)
+            {
+                foreach(j; 0 .. i + 1)
+                {
+                    if (JJ[i, j])
+                    {
+                        P_x[nzc] = JJ[i, j];
+                        P_i[nzc] = j;
+                        nzc++;
+                    }
+                }
+                P_p[i + 1] = nzc;
+            }
+
+            OSQPSettings settings;
+            OSQPData data;
+            data.n = n;
+            data.m = n;
+            data.P = assumePure(&csc_matrix)(n, n, nnz, P_x.ptr, P_i.ptr, P_p.ptr);
+            data.q = q.ptr;
+            data.A = assumePure(&csc_matrix)(n, n, n, A_x.ptr, A_i.ptr, A_p.ptr);
+            data.l = lb.ptr;
+            data.u = ub.ptr;
+
+            OSQPWorkspace* work;
+            (() @trusted => assumePure(&osqp_set_default_settings)(&settings))();
+
+            settings.alpha = 1.0; // Change alpha parameter
+            assert(assumePure(&validate_data)(&data) == 0);
+            auto status = assumePure(&osqp_setup)(&work, &data, &settings);
+            assert(!status);
+            import core.stdc.stdio;
+            status = assumePure(&osqp_solve)(work);
+            if (work.info.status_val != OSQP_SOLVED)
+            {
+                return lm.status = LMStatus.numericError;
+            }
+            deltaX[] = work.solution.x.sliced(n);
+            axpy(1, x, deltaX);
+            assumePure(&osqp_cleanup)(work);
+        }
 
         axpy(-1, x, deltaX);
         copy(y, mBuffer);
@@ -1384,19 +1473,33 @@ L_conservative:
 }}
 
 pragma(inline, false)
-void applyLowerBound(T)(Slice!(T*) x, Slice!(const(T)*) bound)
+bool applyLowerBound(T)(Slice!(T*) x, Slice!(const(T)*) bound)
 {
-    import mir.math.common: fmax;
+    bool ret;
     foreach (i; 0 .. x.length)
-        x[i] = x[i].fmax(bound[i]);
+    {
+        if (x[i] < bound[i])
+        {
+            x[i] = bound[i];
+            ret = true;
+        }
+    }
+    return ret;
 }
 
 pragma(inline, false)
-void applyUpperBound(T)(Slice!(T*) x, Slice!(const(T)*) bound)
+bool applyUpperBound(T)(Slice!(T*) x, Slice!(const(T)*) bound)
 {
-    import mir.math.common: fmin;
+    bool ret;
     foreach (i; 0 .. x.length)
-        x[i] = x[i].fmin(bound[i]);
+    {
+        if (x[i] > bound[i])
+        {
+            x[i] = bound[i];
+            ret = true;
+        }
+    }
+    return ret;
 }
 
 pragma(inline, false)
