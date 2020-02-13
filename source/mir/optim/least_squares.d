@@ -1253,11 +1253,11 @@ L_conservative:
             auto nnz = n * n; // JJ.count!"a";
 
             auto A_x = RCArray!double(n);
-            auto A_i = RCArray!long(n);
-            auto A_p = RCArray!long(n + 1);
+            auto A_i = RCArray!size_t(n);
+            auto A_p = RCArray!size_t(n + 1);
             auto P_x = RCArray!double(nnz);
-            auto P_i = RCArray!long(nnz);
-            auto P_p = RCArray!long(n + 1);
+            auto P_i = RCArray!size_t(nnz);
+            auto P_p = RCArray!size_t(n + 1);
             auto q = RCArray!double(n);
             auto lb = RCArray!double(n);
             auto ub = RCArray!double(n);
