@@ -8,6 +8,241 @@ static import cblas;
 import lapack: lapackint;
 
 import mir.utility: max;
+import mir.math.common: fmin, fmax, fabs, sqrt;
+import mir.math.constant: GoldenRatio;
+
+alias T = double;
+
+/++
++/
+struct QPSolverSettings
+{
+    /++
+    +/
+    T epsAbs = T.epsilon.sqrt.sqrt;
+    /++
+    +/
+    T epsRel = T.epsilon.sqrt.sqrt;
+    /++
+    +/
+    T initialRho = T(1) / 8;
+    /++
+    +/
+    T minRho = T.epsilon.sqrt;
+    /++
+    +/
+    T maxRho = 1 / T.epsilon.sqrt; 
+    /++
+    +/
+    bool adaptiveRho = true;
+    /++
+    +/
+    int minAdaptiveRhoAge = 4000;
+    /++
+    +/
+    int maxIterations = 4000;
+}
+
+/++
++/
+enum QPTerminationCriteria
+{
+    ///
+    numericError = -1,
+    ///
+    none,
+    ///
+    solved,
+    ///
+    primalInfeasibility,
+    ///
+    dualInfeasibility,
+    ///
+    maxIterations,
+}
+
+@safe pure nothrow @nogc
+void divBy(scope T[] target, scope const T[] roots)
+{
+    foreach (i; 0 .. target.length)
+        target[i] *= 1 / roots[i];
+}
+
+@safe pure nothrow @nogc
+void mulBy(scope T[] target, scope const T[] roots)
+{
+    foreach (i; 0 .. target.length)
+        target[i] *= roots[i];
+}
+
+/++
++/
+@safe pure nothrow @nogc
+QPTerminationCriteria approxSolveQP(
+    scope ref const QPSolverSettings settings,
+    Slice!(const(T)*, 2, Canonical) P_eigenVectors,
+    scope const T[] P_eigenValues,
+    scope const T[] q,
+    scope T[] x,
+    scope T[] y,
+    scope T[] z,
+    scope T[] work,
+    scope void delegate(
+        scope const(T)[] x,
+        scope T[] z,
+    ) @safe pure nothrow @nogc projection,
+    scope QPTerminationCriteria delegate(
+        scope const(T)[] xScaled,
+        scope const(T)[] xScaledPrev,
+        scope const(T)[] yScaled,
+        scope const(T)[] yScaledPrev,
+    ) @safe pure nothrow @nogc infeasibilityTolerance = null
+) 
+in {
+    assert(projection);
+    assert(x.length == y.length);
+    assert(z.length == y.length);
+    assert(work.length >= y.length * 5);
+    assert(P_eigenValues.length == y.length);
+    assert(P_eigenVectors.length!0 == y.length);
+    assert(P_eigenVectors.length!1 == y.length);
+    // assert(P_eigenValues[$ - 1] > T.min_normal);
+    assert(P_eigenValues[0] <= T.max);
+}
+do {
+    import mir.blas: gemv;
+
+    auto n = x.length;
+    auto r = n;
+    while (r && P_eigenValues[r - 1] < T.min_normal) r--;
+    auto eroots = work[0 .. r]; work = work[r .. $];
+    auto innerQ = work[0 .. r]; work = work[r .. $];
+    auto innerX = work[0 .. r]; work = work[r .. $];
+    auto innerY = work[0 .. r]; work = work[r .. $];
+    auto innerZ = work[0 .. r]; work = work[r .. $];
+    auto temp = work[0 .. n]; work = work[n .. $];
+    foreach (i; 0 .. r)
+        eroots[i] = P_eigenValues[i].sqrt;
+    gemv!T(1, P_eigenVectors[0 .. r], q.sliced, 0, innerQ.sliced);
+    innerQ.divBy(eroots);
+    gemv!T(1, P_eigenVectors[0 .. $, 0 .. r], x.sliced, 0, innerX.sliced);
+    innerX.mulBy(eroots);
+    gemv!T(1, P_eigenVectors[0 .. $, 0 .. r], y.sliced, 0, innerY.sliced);
+    innerY.mulBy(eroots);
+    auto ret = approxSolveQP(
+        settings,
+        innerQ,
+        innerX,
+        innerY,
+        innerZ,
+        work,
+        // inner task
+        (
+            scope const(T)[] innerX,
+            scope T[] innerZ,
+        ){
+            assert (innerX.length == r);
+            assert (innerZ.length == r);
+            // use innerZ as temporal storage
+            innerZ[] = innerX;
+            innerZ.divBy(eroots);
+            gemv!T(1, P_eigenVectors[0 .. r].transposed, innerZ.sliced, 0, x.sliced); // set X
+            projection(x, z); // set Z
+            gemv!T(1, P_eigenVectors[0 .. $, 0 .. r], z.sliced, 0, innerZ.sliced);
+            innerZ.mulBy(eroots);
+        },
+        infeasibilityTolerance
+    );
+    // set Y
+    innerY.divBy(eroots);
+    gemv!T(1, P_eigenVectors[0 .. r].transposed, innerY.sliced, 0, y.sliced);
+    return ret;
+}
+
+/++
++/
+QPTerminationCriteria approxSolveQP(
+    scope ref const QPSolverSettings settings,
+    scope const T[] q,
+    scope T[] x,
+    scope T[] y,
+    scope T[] z,
+    scope T[] work,
+    scope void delegate(
+        scope const(T)[] x,
+        scope T[] z,
+    ) @safe pure nothrow @nogc projection,
+    scope QPTerminationCriteria delegate(
+        scope const(T)[] x,
+        scope const(T)[] xPrev,
+        scope const(T)[] y,
+        scope const(T)[] yPrev,
+    ) @safe pure nothrow @nogc infeasibilityTolerance = null
+) @safe pure nothrow @nogc
+in {
+    assert(projection);
+    assert(x.length == y.length);
+    assert(z.length == y.length);
+    assert(work.length >= y.length * 2);
+}
+do {
+    auto n = x.length;
+    auto qCurr = q.sliced;
+    auto xCurr = x.sliced;
+    auto yCurr = y.sliced;
+    auto zCurr = z.sliced;
+    auto xPrev = work[n * 0 .. n * 1].sliced;
+    auto yPrev = work[n * 1 .. n * 2].sliced;
+    xPrev[] = xCurr;
+    zCurr[] = xCurr;
+    yPrev[] = yCurr;
+    int rhoAge;
+    T qMax = T(0).reduce!fmax(map!fabs(qCurr));
+    T rho = settings.initialRho;
+    with(settings) foreach (i; 0 .. maxIterations)
+    {
+        rho = rho.fmin(maxRho).fmax(minRho);
+
+        xCurr[] = GoldenRatio * (1 / (1 + rho)) * (rho * zCurr - yPrev - qCurr);
+        yCurr[] = xCurr + (1 - GoldenRatio) * zCurr + 1 / rho * yPrev;
+        xCurr[] += (1 - GoldenRatio) * xPrev;
+        projection(y, z);
+        yCurr[] = rho * (yCurr - zCurr);
+
+        T xMax = T(0).reduce!fmax(map!fabs(xCurr));
+        T yMax = T(0).reduce!fmax(map!fabs(yCurr));
+        T zMax = T(0).reduce!fmax(map!fabs(zCurr));
+        T primResidual = T(0).reduce!fmax(map!fabs(xCurr - zCurr));
+        T dualResidual = T(0).reduce!fmax(map!fabs(xCurr + yCurr + qCurr));
+        T primScale = fmax(xMax, zMax);
+        T dualScale = fmax(qMax, fmax(xMax, yMax));
+        T primResidualNormalized = primResidual ? primResidual / primScale : 0;
+        T dualResidualNormalized = dualResidual ? dualResidual / dualScale : 0;
+
+        T epsPrim = epsAbs + epsRel * primScale;
+        T epsDual = epsAbs + epsRel * dualScale;
+        if (primResidual <= epsPrim && dualResidual <= epsDual)
+            return QPTerminationCriteria.solved;
+
+        if (infeasibilityTolerance)
+            if (auto criteria = infeasibilityTolerance(x, xPrev.field, y, yPrev.field))
+                return criteria;
+
+        if (adaptiveRho && ++rhoAge >= minAdaptiveRhoAge)
+        {
+            T newRho = rho * sqrt(primResidualNormalized / dualResidualNormalized);
+            if (fmax(rho, newRho) > 5 * fmin(rho, newRho))
+            {
+                zCurr[] = xCurr;
+                rho = newRho;
+                rhoAge = 0;
+            }
+        }
+    }
+    return QPTerminationCriteria.maxIterations;
+}
+
+version(nono):
 
 ///
 size_t sytrf_rk(T)(
@@ -167,15 +402,6 @@ auto infNormDistance(T)(Slice!(const(T)*) x, Slice!(const(T)*) y)
 auto faminElem(T, SliceKind kind)(Slice!(const(T)*, 1, kind) x)
 {
     return reduce!fmin(+T.infinity, x.map!fabs);
-}
-
-enum QPTerminationCriteria
-{
-    none,
-    primal,
-    dual,
-    primalInfeasibility,
-    dualInfeasibility,
 }
 
 struct QPSolver(T)
