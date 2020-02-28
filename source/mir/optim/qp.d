@@ -7,9 +7,10 @@ static import lapack;
 static import cblas;
 import lapack: lapackint;
 
-import mir.utility: max;
+import mir.utility: min, max;
 import mir.math.common: fmin, fmax, fabs, sqrt;
 import mir.math.constant: GoldenRatio;
+import mir.blas: gemv;
 
 alias T = double;
 
@@ -62,17 +63,194 @@ enum QPTerminationCriteria
 }
 
 @safe pure nothrow @nogc
-void divBy(scope T[] target, scope const T[] roots)
+void divBy(Slice!(T*) target, Slice!(const(T)*) roots)
 {
     foreach (i; 0 .. target.length)
         target[i] *= 1 / roots[i];
 }
 
 @safe pure nothrow @nogc
-void mulBy(scope T[] target, scope const T[] roots)
+void mulBy(Slice!(T*) target, Slice!(const(T)*) roots)
 {
     foreach (i; 0 .. target.length)
         target[i] *= roots[i];
+}
+
+// @safe pure nothrow @nogc
+// QPTerminationCriteria solveQuickQP(
+//     scope ref const QPSolverSettings settings,
+//     Slice!(const(T)*, 2, Canonical) P_eigenVectors,
+//     Slice!(const(T)*) P_eigenValues,
+//     Slice!(const(T)*) q,
+//     Slice!(const(T)*) l,
+//     Slice!(const(T)*) u,
+//     Slice!(T*) x,
+//     Slice!(T*) work,
+//     scope QPTerminationCriteria delegate(
+//         Slice!(const(T)*) xScaled,
+//         Slice!(const(T)*) xScaledPrev,
+//         Slice!(const(T)*) yScaled,
+//         Slice!(const(T)*) yScaledPrev,
+//     ) @safe pure nothrow @nogc infeasibilityTolerance = null
+// ) 
+// {
+
+private void projection(Slice!(const(T)*) l, Slice!(const(T)*) u, Slice!(const(T)*) x, Slice!(T*) z)
+in {
+    assert(x.length == z.length);
+    assert(l.length == z.length);
+    assert(u.length == z.length);
+}
+do {
+    foreach (i; 0 .. x.length)
+        z[i] = x[i].fmax(l[i]).fmin(u[i]);
+}
+
+QPTerminationCriteria solveQP(
+    Slice!(const(T)*, 2, Canonical) P,
+    Slice!(const(T)*) q,
+    Slice!(const(T)*, 2, Canonical) A,
+    Slice!(const(T)*) l,
+    Slice!(const(T)*) r,
+    Slice!(T*) x,
+    QPSolverSettings settings = QPSolverSettings.init,
+)
+{
+    return QPTerminationCriteria.init;
+}
+
+QPTerminationCriteria solveQuickQP(
+    Slice!(const(T)*, 2, Canonical) P,
+    Slice!(const(T)*) q,
+    Slice!(const(T)*) l,
+    Slice!(const(T)*) r,
+    Slice!(T*) x,
+    QPSolverSettings settings = QPSolverSettings.init,
+)
+{
+    return QPTerminationCriteria.init;
+}
+
+QPTerminationCriteria solveTrivialQP(
+    Slice!(const(T)*) q,
+    Slice!(const(T)*) l,
+    Slice!(const(T)*) r,
+    Slice!(T*) x,
+    QPSolverSettings settings = QPSolverSettings.init,
+)
+{
+
+    return QPTerminationCriteria.init;
+}
+
+@safe pure nothrow @nogc
+private void eigenSqrtTimes(
+    Slice!(const(T)*, 2, Canonical) eigenVectors,
+    Slice!(const(T)*) eigenValuesRoots,
+    Slice!(const(T)*) x,
+    Slice!(T*) y,
+)
+in {
+    assert(eigenVectors.length!0 == eigenVectors.length!1);
+    assert(eigenVectors.length!0 == eigenVectors.length!1);
+    assert(eigenValuesRoots.length <= eigenVectors.length);
+    assert(x.length == eigenVectors.length);
+    assert(y.length == eigenValuesRoots.length);
+}
+body {
+    auto r = eigenValuesRoots.length;
+    gemv!T(1, eigenVectors[0 .. r], x, 0, y);
+    y.mulBy(eigenValuesRoots);
+}
+
+@safe pure nothrow @nogc
+private void eigenSqrtSolve(
+    Slice!(const(T)*, 2, Canonical) eigenVectors,
+    Slice!(const(T)*) eigenValuesRoots,
+    Slice!(T*) y,
+    Slice!(T*) x,
+)
+in {
+    assert(eigenVectors.length!0 == eigenVectors.length!1);
+    assert(eigenVectors.length!0 == eigenVectors.length!1);
+    assert(eigenValuesRoots.length <= eigenVectors.length);
+    assert(x.length == eigenVectors.length);
+    assert(y.length == eigenValuesRoots.length);
+}
+body {
+    auto r = eigenValuesRoots.length;
+    y.divBy(eigenValuesRoots);
+    gemv!T(1, eigenVectors[0 .. r].transposed, y, 0, x);
+}
+
+@safe pure nothrow @nogc
+private void eigenSqrtSplit(
+    Slice!(const(T)*, 2, Canonical) eigenVectors,
+    Slice!(const(T)*) eigenValuesRoots,
+    Slice!(const(T)*) x,
+    Slice!(T*) y,
+)
+in {
+    assert(eigenVectors.length!0 == eigenVectors.length!1);
+    assert(eigenVectors.length!0 == eigenVectors.length!1);
+    assert(eigenValuesRoots.length <= eigenVectors.length);
+    assert(x.length == eigenVectors.length);
+    assert(y.length == eigenValuesRoots.length);
+}
+body {
+    auto r = eigenValuesRoots.length;
+    gemv!T(1, eigenVectors[0 .. r], x, 0, y);
+    y.divBy(eigenValuesRoots);
+}
+
+@safe pure nothrow @nogc
+private void svdTimes(
+    Slice!(const(T)*, 2, Canonical) leftSingularVectors,
+    Slice!(const(T)*, 2, Canonical) rightSingularVectors,
+    Slice!(const(T)*) singularValues,
+    Slice!(const(T)*) x,
+    Slice!(T*) temp,
+    Slice!(T*) y,
+)
+in {
+    assert(leftSingularVectors.length!0 == leftSingularVectors.length!1);
+    assert(rightSingularVectors.length!0 == rightSingularVectors.length!1);
+    assert(singularValues.length <= min(leftSingularVectors.length, rightSingularVectors.length));
+    assert(singularValues.length <= temp.length);
+    assert(x.length == rightSingularVectors.length);
+    assert(y.length == leftSingularVectors.length);
+}
+body {
+    auto r = singularValues.length;
+    temp = temp[0 ..r];
+    gemv!T(1, rightSingularVectors[0 .. r], x, 0, temp);
+    temp.mulBy(singularValues);
+    gemv!T(1, leftSingularVectors[0 .. r].transposed, temp, 0, y);
+}
+
+@safe pure nothrow @nogc
+private void svdSolve(
+    Slice!(const(T)*, 2, Canonical) leftSingularVectors,
+    Slice!(const(T)*, 2, Canonical) rightSingularVectors,
+    Slice!(const(T)*) singularValues,
+    Slice!(const(T)*) y,
+    Slice!(T*) temp,
+    Slice!(T*) x,
+)
+in {
+    assert(leftSingularVectors.length!0 == leftSingularVectors.length!1);
+    assert(rightSingularVectors.length!0 == rightSingularVectors.length!1);
+    assert(singularValues.length <= min(leftSingularVectors.length, rightSingularVectors.length));
+    assert(singularValues.length <= temp.length);
+    assert(x.length == rightSingularVectors.length);
+    assert(y.length == leftSingularVectors.length);
+}
+body {
+    auto r = singularValues.length;
+    temp = temp[0 ..r];
+    gemv!T(1, leftSingularVectors.transposed[0 .. r], y, 0, temp);
+    temp.divBy(singularValues);
+    gemv!T(1, rightSingularVectors[0 .. $, 0 .. r], temp, 0, x);
 }
 
 /++
@@ -80,33 +258,110 @@ void mulBy(scope T[] target, scope const T[] roots)
 @safe pure nothrow @nogc
 QPTerminationCriteria approxSolveQP(
     scope ref const QPSolverSettings settings,
+    Slice!(const(T)*, 2, Canonical) A_leftSingularVectors,
+    Slice!(const(T)*, 2, Canonical) A_rightSingularVectors,
+    Slice!(const(T)*) A_singularValues,
     Slice!(const(T)*, 2, Canonical) P_eigenVectors,
-    scope const T[] P_eigenValues,
-    scope const T[] q,
-    scope T[] x,
-    scope T[] y,
-    scope T[] z,
-    scope T[] work,
+    Slice!(const(T)*) P_eigenValues,
+    Slice!(const(T)*) q,
+    Slice!(T*) x,
+    Slice!(T*) y,
+    Slice!(T*) z,
+    Slice!(T*) work,
     scope void delegate(
-        scope const(T)[] x,
-        scope T[] z,
+        Slice!(const(T)*) x,
+        Slice!(T*) z,
     ) @safe pure nothrow @nogc projection,
     scope QPTerminationCriteria delegate(
-        scope const(T)[] xScaled,
-        scope const(T)[] xScaledPrev,
-        scope const(T)[] yScaled,
-        scope const(T)[] yScaledPrev,
+        Slice!(const(T)*) xScaled,
+        Slice!(const(T)*) xScaledPrev,
+        Slice!(const(T)*) yScaled,
+        Slice!(const(T)*) yScaledPrev,
     ) @safe pure nothrow @nogc infeasibilityTolerance = null
 ) 
 in {
     assert(projection);
     assert(x.length == y.length);
     assert(z.length == y.length);
-    assert(work.length >= y.length * 5);
-    assert(P_eigenValues.length == y.length);
-    assert(P_eigenVectors.length!0 == y.length);
-    assert(P_eigenVectors.length!1 == y.length);
-    // assert(P_eigenValues[$ - 1] > T.min_normal);
+    assert(work.length >= x.length * 8 + y.length * 2);
+    assert(P_eigenValues.length == x.length);
+    assert(P_eigenVectors.length!0 == P_eigenVectors.length!1);
+    assert(P_eigenValues[0] <= T.max);
+
+    assert(A_leftSingularVectors.length!0 == A_leftSingularVectors.length!1);
+    assert(A_rightSingularVectors.length!0 == A_rightSingularVectors.length!1);
+    assert(A_singularValues.length == min(A_leftSingularVectors.length, A_rightSingularVectors.length));
+
+    assert(A_rightSingularVectors.length == x.length);
+    assert(A_leftSingularVectors.length == z.length);
+}
+do {
+    auto n = x.length;
+    auto m = y.length;
+    auto r = A_singularValues.length;
+    while (r && A_singularValues[r - 1] < T.min_normal) r--;
+    A_singularValues = A_singularValues[0 .. r];
+    auto innerY = work[0 .. m]; work = work[m .. $];
+    auto innerZ = work[0 .. m]; work = work[m .. $];
+    auto tempN = work[0 .. n]; work = work[n .. $];
+    svdSolve(A_leftSingularVectors, A_rightSingularVectors, A_singularValues, y, tempN, innerY);
+    auto ret = approxSolveQuickQP(
+        settings,
+        P_eigenVectors,
+        P_eigenValues,
+        q,
+        x,
+        innerY,
+        innerZ,
+        work,
+        // inner task
+        (
+            Slice!(const(T)*) innerX,
+            Slice!(T*) innerZ,
+        ){
+            assert (innerX.length == n);
+            assert (innerZ.length == n);
+            svdTimes(A_leftSingularVectors, A_rightSingularVectors, A_singularValues, innerX, innerZ, tempN);
+            projection(tempN, z); // set Z
+            svdSolve(A_leftSingularVectors, A_rightSingularVectors, A_singularValues, z, tempN, innerZ);
+        },
+        infeasibilityTolerance
+    );
+    // set Y
+    svdTimes(A_leftSingularVectors, A_rightSingularVectors, A_singularValues, innerY, tempN, y);
+    return ret;
+}
+
+/++
++/
+@safe pure nothrow @nogc
+QPTerminationCriteria approxSolveQuickQP(
+    scope ref const QPSolverSettings settings,
+    Slice!(const(T)*, 2, Canonical) P_eigenVectors,
+    Slice!(const(T)*) P_eigenValues,
+    Slice!(const(T)*) q,
+    Slice!(T*) x,
+    Slice!(T*) y,
+    Slice!(T*) z,
+    Slice!(T*) work,
+    scope void delegate(
+        Slice!(const(T)*) x,
+        Slice!(T*) z,
+    ) @safe pure nothrow @nogc projection,
+    scope QPTerminationCriteria delegate(
+        Slice!(const(T)*) xScaled,
+        Slice!(const(T)*) xScaledPrev,
+        Slice!(const(T)*) yScaled,
+        Slice!(const(T)*) yScaledPrev,
+    ) @safe pure nothrow @nogc infeasibilityTolerance = null
+) 
+in {
+    assert(projection);
+    assert(x.length == y.length);
+    assert(z.length == x.length);
+    assert(work.length >= x.length * 7);
+    assert(P_eigenValues.length == x.length);
+    assert(P_eigenVectors.length!0 == P_eigenVectors.length!1);
     assert(P_eigenValues[0] <= T.max);
 }
 do {
@@ -120,16 +375,12 @@ do {
     auto innerX = work[0 .. r]; work = work[r .. $];
     auto innerY = work[0 .. r]; work = work[r .. $];
     auto innerZ = work[0 .. r]; work = work[r .. $];
-    auto temp = work[0 .. n]; work = work[n .. $];
     foreach (i; 0 .. r)
         eroots[i] = P_eigenValues[i].sqrt;
-    gemv!T(1, P_eigenVectors[0 .. r], q.sliced, 0, innerQ.sliced);
-    innerQ.divBy(eroots);
-    gemv!T(1, P_eigenVectors[0 .. $, 0 .. r], x.sliced, 0, innerX.sliced);
-    innerX.mulBy(eroots);
-    gemv!T(1, P_eigenVectors[0 .. $, 0 .. r], y.sliced, 0, innerY.sliced);
-    innerY.mulBy(eroots);
-    auto ret = approxSolveQP(
+    eigenSqrtSplit(P_eigenVectors, eroots, q, innerQ);
+    eigenSqrtTimes(P_eigenVectors, eroots, x, innerX);
+    eigenSqrtTimes(P_eigenVectors, eroots, y, innerY);
+    auto ret = approxSolveTrivialQP(
         settings,
         innerQ,
         innerX,
@@ -138,45 +389,42 @@ do {
         work,
         // inner task
         (
-            scope const(T)[] innerX,
-            scope T[] innerZ,
+            Slice!(const(T)*) innerX,
+            Slice!(T*) innerZ,
         ){
             assert (innerX.length == r);
             assert (innerZ.length == r);
             // use innerZ as temporal storage
             innerZ[] = innerX;
-            innerZ.divBy(eroots);
-            gemv!T(1, P_eigenVectors[0 .. r].transposed, innerZ.sliced, 0, x.sliced); // set X
+            eigenSqrtSolve(P_eigenVectors, eroots, innerZ, x);
             projection(x, z); // set Z
-            gemv!T(1, P_eigenVectors[0 .. $, 0 .. r], z.sliced, 0, innerZ.sliced);
-            innerZ.mulBy(eroots);
+            eigenSqrtTimes(P_eigenVectors, eroots, z, innerZ);
         },
         infeasibilityTolerance
     );
     // set Y
-    innerY.divBy(eroots);
-    gemv!T(1, P_eigenVectors[0 .. r].transposed, innerY.sliced, 0, y.sliced);
+    eigenSqrtSolve(P_eigenVectors, eroots, innerY, y);
     return ret;
 }
 
 /++
 +/
-QPTerminationCriteria approxSolveQP(
+QPTerminationCriteria approxSolveTrivialQP(
     scope ref const QPSolverSettings settings,
-    scope const T[] q,
-    scope T[] x,
-    scope T[] y,
-    scope T[] z,
-    scope T[] work,
+    Slice!(const(T)*) q,
+    Slice!(T*) x,
+    Slice!(T*) y,
+    Slice!(T*) z,
+    Slice!(T*) work,
     scope void delegate(
-        scope const(T)[] x,
-        scope T[] z,
+        Slice!(const(T)*) x,
+        Slice!(T*) z,
     ) @safe pure nothrow @nogc projection,
     scope QPTerminationCriteria delegate(
-        scope const(T)[] x,
-        scope const(T)[] xPrev,
-        scope const(T)[] y,
-        scope const(T)[] yPrev,
+        Slice!(const(T)*) x,
+        Slice!(const(T)*) xPrev,
+        Slice!(const(T)*) y,
+        Slice!(const(T)*) yPrev,
     ) @safe pure nothrow @nogc infeasibilityTolerance = null
 ) @safe pure nothrow @nogc
 in {
@@ -187,33 +435,29 @@ in {
 }
 do {
     auto n = x.length;
-    auto qCurr = q.sliced;
-    auto xCurr = x.sliced;
-    auto yCurr = y.sliced;
-    auto zCurr = z.sliced;
-    auto xPrev = work[n * 0 .. n * 1].sliced;
-    auto yPrev = work[n * 1 .. n * 2].sliced;
-    xPrev[] = xCurr;
-    zCurr[] = xCurr;
-    yPrev[] = yCurr;
+    auto xPrev = work[n * 0 .. n * 1];
+    auto yPrev = work[n * 1 .. n * 2];
+    xPrev[] = x;
+    z[] = x;
+    yPrev[] = y;
     int rhoAge;
-    T qMax = T(0).reduce!fmax(map!fabs(qCurr));
+    T qMax = T(0).reduce!fmax(map!fabs(q));
     T rho = settings.initialRho;
     with(settings) foreach (i; 0 .. maxIterations)
     {
         rho = rho.fmin(maxRho).fmax(minRho);
 
-        xCurr[] = GoldenRatio * (1 / (1 + rho)) * (rho * zCurr - yPrev - qCurr);
-        yCurr[] = xCurr + (1 - GoldenRatio) * zCurr + 1 / rho * yPrev;
-        xCurr[] += (1 - GoldenRatio) * xPrev;
+        x[] = GoldenRatio * (1 / (1 + rho)) * (rho * z - yPrev - q);
+        y[] = x + (1 - GoldenRatio) * z + 1 / rho * yPrev;
+        x[] += (1 - GoldenRatio) * xPrev;
         projection(y, z);
-        yCurr[] = rho * (yCurr - zCurr);
+        y[] = rho * (y - z);
 
-        T xMax = T(0).reduce!fmax(map!fabs(xCurr));
-        T yMax = T(0).reduce!fmax(map!fabs(yCurr));
-        T zMax = T(0).reduce!fmax(map!fabs(zCurr));
-        T primResidual = T(0).reduce!fmax(map!fabs(xCurr - zCurr));
-        T dualResidual = T(0).reduce!fmax(map!fabs(xCurr + yCurr + qCurr));
+        T xMax = T(0).reduce!fmax(map!fabs(x));
+        T yMax = T(0).reduce!fmax(map!fabs(y));
+        T zMax = T(0).reduce!fmax(map!fabs(z));
+        T primResidual = T(0).reduce!fmax(map!fabs(x - z));
+        T dualResidual = T(0).reduce!fmax(map!fabs(x + y + q));
         T primScale = fmax(xMax, zMax);
         T dualScale = fmax(qMax, fmax(xMax, yMax));
         T primResidualNormalized = primResidual ? primResidual / primScale : 0;
@@ -225,7 +469,7 @@ do {
             return QPTerminationCriteria.solved;
 
         if (infeasibilityTolerance)
-            if (auto criteria = infeasibilityTolerance(x, xPrev.field, y, yPrev.field))
+            if (auto criteria = infeasibilityTolerance(x, xPrev, y, yPrev))
                 return criteria;
 
         if (adaptiveRho && ++rhoAge >= minAdaptiveRhoAge)
@@ -233,7 +477,7 @@ do {
             T newRho = rho * sqrt(primResidualNormalized / dualResidualNormalized);
             if (fmax(rho, newRho) > 5 * fmin(rho, newRho))
             {
-                zCurr[] = xCurr;
+                z[] = x;
                 rho = newRho;
                 rhoAge = 0;
             }
@@ -470,7 +714,7 @@ struct QPSolver(T)
         mir.blas.axpy!T(-1, q, x);
         mir.blas.axpy!T(sigma, x_prev, x);
         if (useA || useP)
-            sytrs_3!T('U', F, F_e, F_ipiv, x.sliced(1, n));
+            sytrs_3!T('U', F, F_e, F_ipiv, x(1, n));
         else
             mir.blas.scale(1 / (1 + sigma + rho), x);
         mir.blas.scale!T(alpha, x);
