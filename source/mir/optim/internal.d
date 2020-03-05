@@ -87,8 +87,7 @@ do {
     y.mulBy(eigenValuesRoots);
 }
 
-import std.stdio;
-// @safe pure nothrow @nogc
+@safe pure nothrow @nogc
 void eigenSqrtSolve(
     Slice!(const(T)*, 2, Canonical) eigenVectors,
     Slice!(const(T)*) eigenValuesRoots,
@@ -105,7 +104,6 @@ in {
 do {
     auto r = eigenValuesRoots.length;
     y.divBy(eigenValuesRoots);
-    debug writeln("invroots = ", 1 / eigenValuesRoots);
     gemv!T(1, eigenVectors[0 .. r].transposed, y, 0, x);
 }
 
@@ -170,9 +168,9 @@ in {
 do {
     auto r = singularValues.length;
     temp = temp[0 ..r];
-    gemv!T(1, rightSingularVectors[0 .. r], x, 0, temp);
+    gemv!T(1, rightSingularVectors[0 .. r].transposed, x, 0, temp);
     temp.mulBy(singularValues);
-    gemv!T(alpha, leftSingularVectors[0 .. r].transposed, temp, 0, y);
+    gemv!T(alpha, leftSingularVectors[0 .. r], temp, 0, y);
 }
 
 @safe pure nothrow @nogc
@@ -194,11 +192,13 @@ in {
     assert(y.length == leftSingularVectors.length);
 }
 do {
+    while(singularValues.length && singularValues[$-1] < T.min_normal)
+        singularValues = singularValues[0 .. $ - 1];
     auto r = singularValues.length;
     temp = temp[0 ..r];
-    gemv!T(1, leftSingularVectors[0 .. $, 0 .. r].transposed, y, 0, temp);
+    gemv!T(1, leftSingularVectors[0 .. $, 0 .. r], y, 0, temp);
     temp.divBy(singularValues);
-    gemv!T(alpha, rightSingularVectors[0 .. $, 0 .. r], temp, 0, x);
+    gemv!T(alpha, rightSingularVectors[0 .. $, 0 .. r].transposed, temp, 0, x);
 }
 
 version(LAPACK_STD_COMPLEX)
@@ -213,17 +213,76 @@ else
     alias _cdouble = cdouble;
 }
 
+void copyMinor(size_t N, IteratorFrom, SliceKind KindFrom, IteratorTo, SliceKind KindTo, IndexIterator)(
+    Slice!(IteratorFrom, N, KindFrom) from,
+    Slice!(IteratorTo, N, KindTo) to,
+    Slice!IndexIterator[N] indexes...
+)
+in {
+    import mir.internal.utility: Iota;
+    static foreach (i; Iota!N)
+        assert(indexes[i].length == to.length!i);
+}
+do {
+    static if (N == 1)
+        to[] = from[indexes[0]];
+    else
+    foreach (i; 0 .. indexes[0].length)
+    {
+        copyMinor!(N - 1)(from[indexes[0][i]], to[i], indexes[1 .. N]);
+    }
+}
 
-/// Solves a real symmetric indefinite system of linear equations AX=B,
-/// using the factorization computed by SSPTRF.
+///
+@safe pure nothrow
+unittest
+{
+    import mir.ndslice;
+    //  0  1  2  3
+    //  4  5  6  7
+    //  8  9 10 11
+    auto a = iota!int(3, 4);
+    auto b = slice!int(2, 2);
+    copyMinor(a, b, [2, 1].sliced, [0, 3].sliced);
+    assert(b == [[8, 11], [4, 7]]);
+}
+
+void reverseInPlace(Iterator)(Slice!Iterator slice)
+{
+    import mir.utility : swap;
+    foreach (i; 0 .. slice.length / 2)
+        swap(slice[i], slice[$ - (i + 1)]);
+}
+
+unittest
+{
+    import mir.ndslice;
+    auto s = 5.iota.slice;
+    s.reverseInPlace;
+    assert([4, 3, 2, 1, 0]);
+}
+
 extern(C) @system @nogc nothrow
 {
+/// Computes the factorization of a real symmetric-indefinite matrix,
+/// using the diagonal pivoting method.
+void ssytrf_rk_(ref const char uplo, ref const lapackint n, float *a, ref const lapackint lda, float* e, lapackint *ipiv, float *work, ref lapackint lwork, ref lapackint info);
+void dsytrf_rk_(ref const char uplo, ref const lapackint n, double *a, ref const lapackint lda, double* e, lapackint *ipiv, double *work, ref lapackint lwork, ref lapackint info);
+void csytrf_rk_(ref const char uplo, ref const lapackint n, _cfloat *a, ref const lapackint lda, _cfloat* e, lapackint *ipiv, _cfloat *work, ref lapackint lwork, ref lapackint info);
+void zsytrf_rk_(ref const char uplo, ref const lapackint n, _cdouble *a, ref const lapackint lda, _cdouble* e, lapackint *ipiv, _cdouble *work, ref lapackint lwork, ref lapackint info);
+
+/// Solves a real symmetric indefinite system of linear equations AX=B,
+/// using the factorization computed by SSPTRF_RK.
 void ssytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(float) *a, ref const lapackint lda, const(float)* e, const(lapackint)* ipiv, float* b, ref const lapackint ldb, ref lapackint info);
 void dsytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(double) *a, ref const lapackint lda, const(double)* e, const(lapackint)* ipiv, double* b, ref const lapackint ldb, ref lapackint info);
 void csytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(_cfloat) *a, ref const lapackint lda, const(_cfloat)* e, const(lapackint)* ipiv, _cfloat* b, ref const lapackint ldb, ref lapackint info);
 void zsytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(_cdouble) *a, ref const lapackint lda, const(_cdouble)* e, const(lapackint)* ipiv, _cdouble* b, ref const lapackint ldb, ref lapackint info);
-
 }
+
+alias sytrf_rk_ = ssytrf_rk_;
+alias sytrf_rk_ = dsytrf_rk_;
+alias sytrf_rk_ = csytrf_rk_;
+alias sytrf_rk_ = zsytrf_rk_;
 
 alias sytrs_3_ = ssytrs_3_;
 alias sytrs_3_ = dsytrs_3_;
@@ -265,7 +324,6 @@ unittest
     alias z = sytrs_3!cdouble;
 }
 
-version(none):
 
 ///
 size_t sytrf_rk(T)(
@@ -286,7 +344,7 @@ do
     lapackint n = cast(lapackint) a.length;
     lapackint lda = cast(lapackint) a._stride.max(1);
     lapackint lwork = cast(lapackint) work.length;
-    lapack.sytrf_rk_(uplo, n, a.iterator, lda, e.iterator, ipiv.iterator, work.iterator, lwork, info);
+    sytrf_rk_(uplo, n, a.iterator, lda, e.iterator, ipiv.iterator, work.iterator, lwork, info);
     assert(info >= 0);
     return info;
 }
@@ -331,6 +389,8 @@ unittest
     alias s = sytrf_rk!float;
     alias d = sytrf_rk!double;
 }
+
+version(none):
 
 ///
 size_t sytrf_wk(T)(
