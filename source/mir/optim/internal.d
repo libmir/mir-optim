@@ -6,12 +6,20 @@ static import lapack;
 public import lapack: lapackint;
 import mir.blas;
 import mir.utility: min, max;
+static import cblas;
 
 alias T = double;
 
 enum mallocErrorMsg = "Failed to allocate memory.";
 version(D_Exceptions)
     static immutable mallocError = new Error(mallocErrorMsg);
+
+private auto matrixStride(S)(S a)
+ if (S.N == 2)
+{
+    assert(a._stride!1 == 1);
+    return a._stride != 1 ? a._stride : a.length!1;
+}
 
 auto safeAlloc(T)(size_t n) @trusted
 {
@@ -262,21 +270,35 @@ unittest
     assert([4, 3, 2, 1, 0]);
 }
 
-extern(C) @system @nogc nothrow
+extern(C) @system pure nothrow @nogc
 {
-/// Computes the factorization of a real symmetric-indefinite matrix,
-/// using the diagonal pivoting method.
-void ssytrf_rk_(ref const char uplo, ref const lapackint n, float *a, ref const lapackint lda, float* e, lapackint *ipiv, float *work, ref lapackint lwork, ref lapackint info);
-void dsytrf_rk_(ref const char uplo, ref const lapackint n, double *a, ref const lapackint lda, double* e, lapackint *ipiv, double *work, ref lapackint lwork, ref lapackint info);
-void csytrf_rk_(ref const char uplo, ref const lapackint n, _cfloat *a, ref const lapackint lda, _cfloat* e, lapackint *ipiv, _cfloat *work, ref lapackint lwork, ref lapackint info);
-void zsytrf_rk_(ref const char uplo, ref const lapackint n, _cdouble *a, ref const lapackint lda, _cdouble* e, lapackint *ipiv, _cdouble *work, ref lapackint lwork, ref lapackint info);
+    /// Computes the factorization of a real symmetric-indefinite matrix,
+    /// using the diagonal pivoting method.
+    void ssytrf_rk_(ref const char uplo, ref const lapackint n, float *a, ref const lapackint lda, float* e, lapackint *ipiv, float *work, ref lapackint lwork, ref lapackint info);
+    void dsytrf_rk_(ref const char uplo, ref const lapackint n, double *a, ref const lapackint lda, double* e, lapackint *ipiv, double *work, ref lapackint lwork, ref lapackint info);
+    void csytrf_rk_(ref const char uplo, ref const lapackint n, _cfloat *a, ref const lapackint lda, _cfloat* e, lapackint *ipiv, _cfloat *work, ref lapackint lwork, ref lapackint info);
+    void zsytrf_rk_(ref const char uplo, ref const lapackint n, _cdouble *a, ref const lapackint lda, _cdouble* e, lapackint *ipiv, _cdouble *work, ref lapackint lwork, ref lapackint info);
 
-/// Solves a real symmetric indefinite system of linear equations AX=B,
-/// using the factorization computed by SSPTRF_RK.
-void ssytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(float) *a, ref const lapackint lda, const(float)* e, const(lapackint)* ipiv, float* b, ref const lapackint ldb, ref lapackint info);
-void dsytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(double) *a, ref const lapackint lda, const(double)* e, const(lapackint)* ipiv, double* b, ref const lapackint ldb, ref lapackint info);
-void csytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(_cfloat) *a, ref const lapackint lda, const(_cfloat)* e, const(lapackint)* ipiv, _cfloat* b, ref const lapackint ldb, ref lapackint info);
-void zsytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(_cdouble) *a, ref const lapackint lda, const(_cdouble)* e, const(lapackint)* ipiv, _cdouble* b, ref const lapackint ldb, ref lapackint info);
+    /// Solves a real symmetric indefinite system of linear equations AX=B,
+    /// using the factorization computed by SSPTRF_RK.
+    void ssytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(float) *a, ref const lapackint lda, const(float)* e, const(lapackint)* ipiv, float* b, ref const lapackint ldb, ref lapackint info);
+    void dsytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(double) *a, ref const lapackint lda, const(double)* e, const(lapackint)* ipiv, double* b, ref const lapackint ldb, ref lapackint info);
+    void csytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(_cfloat) *a, ref const lapackint lda, const(_cfloat)* e, const(lapackint)* ipiv, _cfloat* b, ref const lapackint ldb, ref lapackint info);
+    void zsytrs_3_(ref const char uplo, ref const lapackint n, ref const lapackint nrhs, const(_cdouble) *a, ref const lapackint lda, const(_cdouble)* e, const(lapackint)* ipiv, _cdouble* b, ref const lapackint ldb, ref lapackint info);
+
+    lapackint ilaenv_(ref const lapackint ispec, scope const(char)* name, scope const(char)* opts, ref const lapackint n1, ref const lapackint n2, ref const lapackint n3, ref const lapackint n4);
+    lapackint ilaenv2stage_(ref const lapackint ispec, scope const(char)* name, scope const(char)* opts, ref const lapackint n1, ref const lapackint n2, ref const lapackint n3, ref const lapackint n4);
+    void ilaenvset_(ref const lapackint ispec, scope const(char)* name, scope const(char)* opts, ref const lapackint n1, ref const lapackint n2, ref const lapackint n3, ref const lapackint n4, ref const lapackint nvalue, ref lapackint info);
+}
+
+lapackint ilaenv()(lapackint ispec, scope const(char)* name, scope const(char)* opts, lapackint n1, lapackint n2, lapackint n3, lapackint n4)
+{
+    return ilaenv_(ispec, name, opts, n1, n2, n3, n4);
+}
+
+lapackint ilaenv2stage()(lapackint ispec, scope const(char)* name, scope const(char)* opts, lapackint n1, lapackint n2, lapackint n3, lapackint n4)
+{
+    return ilaenv2stage_(ispec, name, opts, n1, n2, n3, n4);
 }
 
 alias sytrf_rk_ = ssytrf_rk_;
@@ -289,7 +311,138 @@ alias sytrs_3_ = dsytrs_3_;
 alias sytrs_3_ = csytrs_3_;
 alias sytrs_3_ = zsytrs_3_;
 
+
+
 ///
+@trusted
+void symv(T,
+    SliceKind kindA,
+    SliceKind kindX,
+    SliceKind kindY,
+    )(
+    Uplo uplo,
+    T alpha,
+    Slice!(const(T)*, 2, kindA) a,
+    Slice!(const(T)*, 1, kindX) x,
+    T beta,
+    Slice!(T*, 1, kindY) y,
+    )
+{
+    assert(a.length!0 == a.length!1);
+    assert(a.length!1 == x.length);
+    assert(a.length!0 == y.length);
+    static if (kindA == Universal)
+    {
+        bool transA;
+        if (a._stride!1 != 1)
+        {
+            a = a.transposed;
+            transA = true;
+        }
+        assert(a._stride!1 == 1, "Matrix A must have a stride equal to 1.");
+    }
+    else
+        enum transA = false;
+    cblas.symv(
+        transA ? cblas.Order.ColMajor : cblas.Order.RowMajor,
+        uplo,
+        
+        cast(cblas.blasint) x.length,
+
+        alpha,
+
+        a.iterator,
+        cast(cblas.blasint) a.matrixStride,
+
+        x.iterator,
+        cast(cblas.blasint) x._stride,
+
+        beta,
+
+        y.iterator,
+        cast(cblas.blasint) y._stride,
+    );
+}
+
+///
+@trusted
+void symm(T,
+    SliceKind kindA,
+    SliceKind kindB,
+    SliceKind kindC,
+    )(
+    Side side,
+    Uplo uplo,
+    T alpha,
+    Slice!(const(T)*, 2, kindA) a,
+    Slice!(const(T)*, 2, kindB) b,
+    T beta,
+    Slice!(T*, 2, kindC) c,
+    )
+{
+    assert(a.length!1 == a.length!0);
+    if (side == Side.Left)
+    {
+        assert(a.length!1 == b.length!0);
+        assert(a.length!0 == c.length!0);
+        assert(c.length!1 == b.length!1);
+    }
+    else
+    {
+        assert(a.length!1 == b.length!1);
+        assert(a.length!0 == c.length!1);
+        assert(c.length!0 == b.length!0);
+    }
+
+    static if (kindA == Universal)
+    {
+        bool transA;
+        if (a._stride!1 != 1)
+        {
+            a = a.transposed;
+            uplo = uplo == Uplo.Lower ? Uplo.Upper : Uplo.Lower;
+        }
+        assert(a._stride!1 == 1, "Matrix A must have a stride equal to 1.");
+    }
+
+    static if (kindB == Universal && kindC == Universal)
+    {
+        if (b._stride!1 != 1
+         || c._stride!1 != 1)
+        {
+            b = b.transposed;
+            c = c.transposed;
+            side = side == Side.Left ? Side.Right : Side.Left;
+        }
+
+    }
+    assert(b._stride!1 == 1 && c._stride!1 == 1, "Matrices B and C must be either both row-major or both column-major.");
+
+    cblas.symm(
+        cblas.Order.RowMajor,
+        side,
+        uplo,
+
+        cast(cblas.blasint) c.length!0,
+        cast(cblas.blasint) c.length!1, 
+
+        alpha,
+
+        a.iterator,
+        cast(cblas.blasint) a.matrixStride,
+
+        b.iterator,
+        cast(cblas.blasint) b.matrixStride,
+
+        beta,
+
+        c.iterator,
+        cast(cblas.blasint) c.matrixStride,
+    );
+}
+
+///
+@trusted
 size_t sytrs_3(T)(
     char uplo,
     Slice!(const(T)*, 2, Canonical) a,
@@ -326,6 +479,7 @@ unittest
 
 
 ///
+@trusted
 size_t sytrf_rk(T)(
     char uplo,
     Slice!(T*, 2, Canonical) a,
