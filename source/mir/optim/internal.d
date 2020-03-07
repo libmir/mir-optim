@@ -4,11 +4,9 @@ import mir.ndslice;
 
 static import lapack;
 public import lapack: lapackint;
+static import cblas;
 import mir.blas;
 import mir.utility: min, max;
-static import cblas;
-
-alias T = double;
 
 enum mallocErrorMsg = "Failed to allocate memory.";
 version(D_Exceptions)
@@ -36,21 +34,21 @@ auto safeAlloc(T)(size_t n) @trusted
 }
 
 @safe pure nothrow @nogc
-void divBy(Slice!(T*) target, Slice!(const(T)*) roots)
+void divBy(T)(Slice!(T*) target, Slice!(const(T)*) roots)
 {
     foreach (i; 0 .. target.length)
         target[i] *= 1 / roots[i];
 }
 
 @safe pure nothrow @nogc
-void mulBy(Slice!(T*) target, Slice!(const(T)*) roots)
+void mulBy(T)(Slice!(T*) target, Slice!(const(T)*) roots)
 {
     foreach (i; 0 .. target.length)
         target[i] *= roots[i];
 }
 
 @safe pure nothrow @nogc
-void eigenTimes(
+void eigenTimes(T)(
     Slice!(const(T)*, 2, Canonical) eigenVectors,
     Slice!(const(T)*) eigenValues,
     Slice!(const(T)*) x,
@@ -63,7 +61,7 @@ void eigenTimes(
 }
 
 @safe pure nothrow @nogc
-void eigenSolve(
+void eigenSolve(T)(
     Slice!(const(T)*, 2, Canonical) eigenVectors,
     Slice!(const(T)*) eigenValues,
     Slice!(const(T)*) y,
@@ -76,7 +74,7 @@ void eigenSolve(
 }
 
 @safe pure nothrow @nogc
-void eigenSqrtTimes(
+void eigenSqrtTimes(T)(
     Slice!(const(T)*, 2, Canonical) eigenVectors,
     Slice!(const(T)*) eigenValuesRoots,
     Slice!(const(T)*) x,
@@ -96,7 +94,7 @@ do {
 }
 
 @safe pure nothrow @nogc
-void eigenSqrtSolve(
+void eigenSqrtSolve(T)(
     Slice!(const(T)*, 2, Canonical) eigenVectors,
     Slice!(const(T)*) eigenValuesRoots,
     Slice!(T*) y,
@@ -116,7 +114,7 @@ do {
 }
 
 @safe pure nothrow @nogc
-void eigenSqrtSplit(
+void eigenSqrtSplit(T)(
     Slice!(const(T)*, 2, Canonical) eigenVectors,
     Slice!(const(T)*) eigenValuesRoots,
     Slice!(const(T)*) x,
@@ -136,7 +134,7 @@ do {
 }
 
 @safe pure nothrow @nogc
-void eigenSqrtSplitReverse(
+void eigenSqrtSplitReverse(T)(
     Slice!(const(T)*, 2, Canonical) eigenVectors,
     Slice!(const(T)*) eigenValuesRoots,
     Slice!(T*) y,
@@ -156,7 +154,7 @@ do {
 }
 
 @safe pure nothrow @nogc
-void svdTimes(
+void svdTimes(T)(
     Slice!(const(T)*, 2, Canonical) leftSingularVectors,
     Slice!(const(T)*, 2, Canonical) rightSingularVectors,
     Slice!(const(T)*) singularValues,
@@ -182,7 +180,7 @@ do {
 }
 
 @safe pure nothrow @nogc
-void svdSolve(
+void svdSolve(T)(
     Slice!(const(T)*, 2, Canonical) leftSingularVectors,
     Slice!(const(T)*, 2, Canonical) rightSingularVectors,
     Slice!(const(T)*) singularValues,
