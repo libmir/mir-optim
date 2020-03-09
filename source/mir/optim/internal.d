@@ -1,11 +1,10 @@
 module mir.optim.internal;
 
-import mir.ndslice;
+import mir.ndslice.slice;
 
 static import lapack;
-public import lapack: lapackint;
+import lapack: lapackint;
 static import cblas;
-import mir.blas;
 import mir.utility: min, max;
 
 enum mallocErrorMsg = "Failed to allocate memory.";
@@ -632,6 +631,7 @@ template posvx(T)
         assert(iwork.length == n);
     }
     do {
+        import mir.ndslice.topology: canonical;
         return posvx(fact, uplo, a, af, equed, s, b.sliced(1, b.length).canonical, x.sliced(1, x.length).canonical, rcond, sliced(&ferr, 1), sliced(&berr, 1), work, iwork);
     }
 }

@@ -2,17 +2,10 @@
 +/
 module mir.optim.boxcqp;
 
-import mir.ndslice;
+import mir.ndslice.slice: Slice, Canonical;
 import lapack: lapackint;
+import mir.math.common: fmin, fmax, sqrt;
 import mir.optim.internal;
-
-import mir.math.sum;
-import mir.utility: min, max;
-import mir.math.common: fmin, fmax, fabs, sqrt;
-import mir.internal.memory;
-import mir.blas;
-import mir.lapack;
-import cblas;
 
 @safe pure nothrow @nogc
 bool solveQP(T)(
@@ -26,6 +19,10 @@ bool solveQP(T)(
     )
     if (is(T == float) || is(T == double))
 {
+    import mir.ndslice.slice: sliced;
+    import mir.ndslice.allocation: rcslice;
+    import mir.ndslice.topology: canonical;
+    import mir.blas: dot;
     enum Flag : byte
     {
         l,
