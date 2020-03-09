@@ -9,8 +9,6 @@ import mir.optim.internal;
 import mir.math.sum;
 import mir.utility: min, max;
 import mir.math.common: fmin, fmax, fabs, sqrt;
-import mir.math.constant: GoldenRatio;
-import mir.blas: gemv;
 import mir.internal.memory;
 import mir.blas;
 import mir.lapack;
