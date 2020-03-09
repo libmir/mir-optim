@@ -241,6 +241,7 @@ do {
 
 ///
 @safe pure nothrow
+version(mir_optim_test)
 unittest
 {
     import mir.ndslice;
@@ -260,6 +261,7 @@ void reverseInPlace(Iterator)(Slice!Iterator slice)
         swap(slice[i], slice[$ - (i + 1)]);
 }
 
+version(mir_optim_test)
 unittest
 {
     import mir.ndslice;
@@ -467,6 +469,7 @@ do
     return info;
 }
 
+version(mir_optim_test)
 unittest
 {
     alias s = sytrs_3!float;
@@ -501,6 +504,7 @@ do
     return info;
 }
 
+version(mir_optim_test)
 unittest
 {
     alias s = sytrf_rk!float;
@@ -536,6 +540,7 @@ do
     return cast(size_t) work;
 }
 
+version(mir_optim_test)
 unittest
 {
     alias s = sytrf_rk!float;
@@ -634,6 +639,7 @@ template posvx(T)
 // char, char, int, int, double*, int, double*, int, char, Slice!(double*, 1LU, cast(mir_slice_kind)2), double*, int, double*, int, double, double*, double*, double*, int*, int
 // ref char fact, ref char uplo, ref int n, ref int nrhs, float* a, ref int lda, float* af, ref int ldaf, char equed, float* s, float* b, ref int ldb, float* x, ref int ldx, ref float rcond, float* ferr, float* berr, float* work, int* iwork, ref int info
 
+version(mir_optim_test)
 unittest
 {
     alias s = posvx!float;
@@ -663,6 +669,7 @@ do
     return cast(size_t) work;
 }
 
+version(mir_optim_test)
 unittest
 {
     alias s = sytrf_wk!float;

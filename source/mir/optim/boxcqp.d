@@ -196,6 +196,7 @@ bool solveQP(T)(
 }
 
 ///
+version(mir_optim_test)
 unittest
 {
     import mir.ndslice;
