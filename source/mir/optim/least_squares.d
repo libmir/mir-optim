@@ -540,7 +540,7 @@ version(mir_optim_test)
 
     lm.optimize!(rosenbrockRes, rosenbrockJac);
 
-    // writeln(lm.iterCt, " ", lm.fCalls, " ", lm.gCalls);
+    // writeln(lm.iterCt, " ", lm.fCalls, " ", lm.gCalls, " ", lm.x);
     assert(nrm2((lm.x - [10, 100].sliced).slice) < 1e-5);
     assert(lm.x.all!"a >= 10");
 }
@@ -1218,29 +1218,22 @@ L_conservative:
             assumePure(&fprintf)(file, "nonbounded_predicted_x = ");
             foreach (ref e; deltaX)
             {
-                assumePure(&fprintf)(file, "%.4f ", e);
+                assumePure(&fprintf)(file, "%e ", e);
             }
             assumePure(&fprintf)(file, "\n");
         }
 
-        bool needsOSQP;
+        bool needsQP;
         if (_lower_ptr)
-            needsOSQP = applyLowerBound(deltaX, lower) || needsOSQP;
+            needsQP = applyLowerBound(deltaX, lower) || needsQP;
         if (_upper_ptr)
-            needsOSQP = applyUpperBound(deltaX, upper) || needsOSQP;
+            needsQP = applyUpperBound(deltaX, upper) || needsQP;
 
-        if (needsOSQP)
+        if (needsQP)
         {
-            import mir.algorithm.iteration;
-            import mir.ndslice.topology;
+            import mir.optim.boxcqp;
             import mir.rc.array;
-
-            // OSQP
-            import auxil;
-            import constants;
-            import cs;
-            import osqp;
-            import types;
+            import mir.algorithm.iteration;
 
             JJ[] = 0;
             import mir.math;
@@ -1250,67 +1243,13 @@ L_conservative:
                 JJ.diagonal[] += lambda;
             else
                 JJ.diagonal[] *= (1 + lambda);
-            auto nnz = n * n; // JJ.count!"a";
+            JJ.eachUploPair!("a = b", false);
 
-            auto A_x = RCArray!double(n);
-            auto A_i = RCArray!sizediff_t(n);
-            auto A_p = RCArray!sizediff_t(n + 1);
-            auto P_x = RCArray!double(nnz);
-            auto P_i = RCArray!sizediff_t(nnz);
-            auto P_p = RCArray!sizediff_t(n + 1);
-            auto q = RCArray!double(n);
-            auto lb = RCArray!double(n);
-            auto ub = RCArray!double(n);
-
-            A_x[][] = 1;
-            A_i[].sliced[] = n.iota;
-            A_p[].sliced[] = (n + 1).iota;
-            q[].sliced[] = -mJy;
-            lb[].sliced[] = lower - x;
-            ub[].sliced[] = upper - x;
-
-            size_t nzc;
-            P_p[0] = 0;
-            foreach(i; 0 .. n)
-            {
-                foreach(j; 0 .. i + 1)
-                {
-                    if (JJ[i, j])
-                    {
-                        P_x[nzc] = JJ[i, j];
-                        P_i[nzc] = j;
-                        nzc++;
-                    }
-                }
-                P_p[i + 1] = nzc;
-            }
-
-            OSQPSettings settings;
-            OSQPData data;
-            data.n = n;
-            data.m = n;
-            data.P = assumePure(&csc_matrix)(n, n, nnz, P_x.ptr, P_i.ptr, P_p.ptr);
-            data.q = q.ptr;
-            data.A = assumePure(&csc_matrix)(n, n, n, A_x.ptr, A_i.ptr, A_p.ptr);
-            data.l = lb.ptr;
-            data.u = ub.ptr;
-
-            OSQPWorkspace* work;
-            (() @trusted => assumePure(&osqp_set_default_settings)(&settings))();
-
-            settings.alpha = 1.0; // Change alpha parameter
-            assert(assumePure(&validate_data)(&data) == 0);
-            auto status = assumePure(&osqp_setup)(&work, &data, &settings);
-            assert(!status);
-            import core.stdc.stdio;
-            status = assumePure(&osqp_solve)(work);
-            if (work.info.status_val != OSQP_SOLVED)
-            {
-                return lm.status = LMStatus.numericError;
-            }
-            deltaX[] = work.solution.x.sliced(n);
+            auto q = rcarray(-mJy);
+            auto l = rcarray(lower - x);
+            auto u = rcarray(upper - x);
+            solveQP(JJ.canonical, q[].sliced, l[].sliced, u[].sliced, deltaX);
             axpy(1, x, deltaX);
-            assumePure(&osqp_cleanup)(work);
         }
 
         axpy(-1, x, deltaX);
@@ -1359,13 +1298,13 @@ L_conservative:
             assumePure(&fprintf)(file, "x = ");
             foreach (ref e; x)
             {
-                assumePure(&fprintf)(file, "%.4f ", e);
+                assumePure(&fprintf)(file, "%e ", e);
             }
             assumePure(&fprintf)(file, "\n");
             assumePure(&fprintf)(file, "proposed_x = ");
             foreach (ref e; nBuffer)
             {
-                assumePure(&fprintf)(file, "%.4f ", e);
+                assumePure(&fprintf)(file, "%e ", e);
             }
             assumePure(&fprintf)(file, "\n");
             assumePure(&fprintf)(file, "conservative = %d\n", conservative);

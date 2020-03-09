@@ -7,7 +7,6 @@ mir_blas_dep = dependency('mir-blas', fallback : ['mir-blas', 'mir_blas_dep'])
 mir_core_dep = dependency('mir-core', fallback : ['mir-core', 'mir_core_dep'])
 mir_lapack_dep = dependency('mir-lapack', fallback : ['mir-lapack', 'mir_lapack_dep'])
 mir_random_dep = dependency('mir-random', fallback : ['mir-random', 'mir_random_dep'], default_options : ['extended=true'])
-osqp_dep = dependency('osqp', fallback : ['osqp', 'osqp_dep'], default_options : 'DLONG=true')
 
 required_deps = [
     cblas_d_dep,
@@ -17,7 +16,6 @@ required_deps = [
     mir_core_dep,
     mir_lapack_dep,
     mir_random_dep,
-    osqp_dep,
 ]
 
 if target_machine.system() == 'linux'
@@ -29,6 +27,8 @@ mir_optim_dir = include_directories('source/', 'include/')
 
 mir_optim_src = [
     'source/mir/optim/least_squares.d',
+    'source/mir/optim/internal.d',
+    'source/mir/optim/boxcqp.d',
 ]
 
 mir_optim_lib = library(meson.project_name(),
