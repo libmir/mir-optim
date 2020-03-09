@@ -87,8 +87,9 @@ bool solveQP(T)(
     {
         convergence = convergence && (l[i] <= x[i] && x[i] <= u[i] );
     }
-    
-    for (size_t step; !convergence && step < maxIteratios; ++step)
+
+    size_t step;
+    for (; !convergence && step < maxIteratios; ++step)
     {
         size_t s;
 
@@ -164,7 +165,7 @@ bool solveQP(T)(
         {
             size_t ii;
             foreach (i; 0 .. n) if (flags[i] == Flag.s)
-                x[i] = sX[ii];
+                x[i] = sX[ii++];
         }
 
         foreach (i; 0 .. n) if (flags[i] == Flag.l)
@@ -187,7 +188,7 @@ bool solveQP(T)(
         } 
     }
 
-    if (convergence)
+    // if (convergence)
         foreach (i; 0 .. n)
             x[i] = x[i].fmin(u[i]).fmax(l[i]);
     
