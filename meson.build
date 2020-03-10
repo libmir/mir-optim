@@ -37,7 +37,7 @@ mir_optim_lib = library(meson.project_name(),
     install: true,
     version: meson.project_version(),
     dependencies: required_deps,
-    d_module_versions: ['mir_test', 'DLONG'],
+    d_module_versions: ['mir_test'],
 )
 
 mir_optim_dep = declare_dependency(
