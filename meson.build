@@ -27,7 +27,6 @@ mir_optim_dir = include_directories('source/')
 
 mir_optim_src = [
     'source/mir/optim/least_squares.d',
-    'source/mir/optim/internal.d',
     'source/mir/optim/boxcqp.d',
 ]
 

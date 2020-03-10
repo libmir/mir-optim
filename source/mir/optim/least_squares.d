@@ -72,6 +72,8 @@ Modified Levenberg-Marquardt parameters, data, and state.
 struct LeastSquaresLM(T)
     if (is(T == double) || is(T == float))
 {
+
+    import mir.optim.boxcqp;
     import mir.math.common: sqrt;
     import lapack: lapackint;
 
@@ -111,8 +113,9 @@ struct LeastSquaresLM(T)
     private T* _x_ptr;
     private T* _deltaX_ptr;
     private T* _deltaXBase_ptr;
-    private T* _mJy_ptr;
-    private lapackint* _ipiv_ptr;
+    private T* _Jy_ptr;
+    private lapackint* _iwork_ptr;
+    private byte* _bwork_ptr;
     private T* _y_ptr;
     private T* _mBuffer_ptr;
     private T* _nBuffer_ptr;
@@ -241,9 +244,10 @@ struct LeastSquaresLM(T)
         +/
         Slice!(T*) y() { return Slice!(T*)([m], _y_ptr); }
     private:
-        Slice!(T*) mJy() { return Slice!(T*)([n], _mJy_ptr); }
+        Slice!(T*) Jy() { return Slice!(T*)([n], _Jy_ptr); }
         Slice!(T*) deltaXBase() { return Slice!(T*)([n], _deltaXBase_ptr); }
-        Slice!(lapackint*) ipiv() { return Slice!(lapackint*)([n], _ipiv_ptr); }
+        Slice!(lapackint*) iwork() { return Slice!(lapackint*)([n], _iwork_ptr); }
+        Slice!(byte*) bwork() { return Slice!(byte*)([n], _bwork_ptr); }
         Slice!(T*) mBuffer() { return Slice!(T*)([m], _mBuffer_ptr); }
         Slice!(T*) nBuffer() { return Slice!(T*)([n], _nBuffer_ptr); }
         Slice!(T*, 2) JJ() { return Slice!(T*, 2)([n, n], _JJ_ptr); }
@@ -298,11 +302,9 @@ struct LeastSquaresLM(T)
     auto gcAlloc()(size_t m, size_t n, bool lowerBounds = false, bool upperBounds = false) nothrow @trusted pure
     {
         import mir.lapack: syev_wk;
-        import mir.ndslice.allocation: uninitSlice, uninitAlignedSlice;
+        import mir.ndslice.allocation: uninitSlice;
         import mir.ndslice.slice: sliced;
         import mir.ndslice.topology: canonical;
-
-        enum alignment = 64;
 
         this.m = m;
         this.n = n;
@@ -310,17 +312,18 @@ struct LeastSquaresLM(T)
         _upper_ptr = [n].uninitSlice!T._iterator;
         lower[] = -T.infinity;
         upper[] = +T.infinity;
-        _ipiv_ptr = [n].uninitSlice!lapackint._iterator;
-        _x_ptr = [n].uninitAlignedSlice!T(alignment)._iterator;
-        _deltaX_ptr = [n].uninitAlignedSlice!T(alignment)._iterator;
-        _mJy_ptr = [n].uninitAlignedSlice!T(alignment)._iterator;
-        _deltaXBase_ptr = [n].uninitAlignedSlice!T(alignment)._iterator;
-        _y_ptr = [m].uninitAlignedSlice!T(alignment)._iterator;
-        _mBuffer_ptr = [m].uninitAlignedSlice!T(alignment)._iterator;
-        _nBuffer_ptr = [n].uninitAlignedSlice!T(alignment)._iterator;
-        _JJ_ptr = [n, n].uninitAlignedSlice!T(alignment)._iterator;
-        _J_ptr = [m, n].uninitAlignedSlice!T(alignment)._iterator;
-        _work = [syev_wk('V', 'L', JJ.canonical, nBuffer)].uninitAlignedSlice!T(alignment);
+        _iwork_ptr = [n].uninitSlice!lapackint._iterator;
+        _bwork_ptr = [n].uninitSlice!byte._iterator;
+        _x_ptr = [n].uninitSlice!T._iterator;
+        _deltaX_ptr = [n].uninitSlice!T._iterator;
+        _Jy_ptr = [n].uninitSlice!T._iterator;
+        _deltaXBase_ptr = [n].uninitSlice!T._iterator;
+        _y_ptr = [m].uninitSlice!T._iterator;
+        _mBuffer_ptr = [m].uninitSlice!T._iterator;
+        _nBuffer_ptr = [n].uninitSlice!T._iterator;
+        _JJ_ptr = [n, n].uninitSlice!T._iterator;
+        _J_ptr = [m, n].uninitSlice!T._iterator;
+        _work = [boxQPWorkLength(n) + n * 2].uninitSlice!T;
         reset;
     }
 
@@ -330,7 +333,6 @@ struct LeastSquaresLM(T)
     pragma(inline, false)
     void stdcAlloc()(size_t m, size_t n, bool lowerBounds = false, bool upperBounds = false) nothrow @nogc @trusted
     {
-        import mir.lapack: syev_wk;
         import mir.ndslice.allocation: stdcUninitSlice, stdcUninitAlignedSlice;
         import mir.ndslice.slice: sliced;
         import mir.ndslice.topology: canonical;
@@ -343,17 +345,18 @@ struct LeastSquaresLM(T)
         _upper_ptr = [n].stdcUninitSlice!T._iterator;
         lower[] = -T.infinity;
         upper[] = +T.infinity;
-        _ipiv_ptr = [n].stdcUninitSlice!lapackint._iterator;
+        _iwork_ptr = [n].stdcUninitSlice!lapackint._iterator;
+        _bwork_ptr = [n].stdcUninitSlice!byte._iterator;
         _x_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
         _deltaX_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _mJy_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
+        _Jy_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
         _deltaXBase_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
         _y_ptr = [m].stdcUninitAlignedSlice!T(alignment)._iterator;
         _mBuffer_ptr = [m].stdcUninitAlignedSlice!T(alignment)._iterator;
         _nBuffer_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
         _JJ_ptr = [n, n].stdcUninitAlignedSlice!T(alignment)._iterator;
         _J_ptr = [m, n].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _work = [syev_wk('V', 'L', JJ.canonical, nBuffer)].stdcUninitAlignedSlice!T(alignment);
+        _work = [boxQPWorkLength(n) + n * 2].stdcUninitAlignedSlice!T(alignment);
         reset;
     }
 
@@ -364,20 +367,20 @@ struct LeastSquaresLM(T)
     void stdcFree()() nothrow @nogc @trusted
     {
         import core.stdc.stdlib: free;
-        import mir.internal.memory: alignedFree;
         if (_lower_ptr) _lower_ptr.free;
         if (_upper_ptr) _upper_ptr.free;
-        _ipiv_ptr.free;
-        _x_ptr.alignedFree;
-        _deltaX_ptr.alignedFree;
-        _mJy_ptr.alignedFree;
-        _deltaXBase_ptr.alignedFree;
-        _y_ptr.alignedFree;
-        _mBuffer_ptr.alignedFree;
-        _nBuffer_ptr.alignedFree;
-        _JJ_ptr.alignedFree;
-        _J_ptr.alignedFree;
-        _work._iterator.alignedFree;
+        _iwork_ptr.free;
+        _bwork_ptr.free;
+        _x_ptr.free;
+        _deltaX_ptr.free;
+        _Jy_ptr.free;
+        _deltaXBase_ptr.free;
+        _y_ptr.free;
+        _mBuffer_ptr.free;
+        _nBuffer_ptr.free;
+        _JJ_ptr.free;
+        _J_ptr.free;
+        _work._iterator.free;
     }
 
     // size_t toHash() @safe pure nothrow @nogc
@@ -1014,7 +1017,7 @@ extern(C) void defaultLMThreadManagerDelegate(T)(void* context, size_t totalThre
     auto f = *cast(LeastSquaresLM!T.FunctionDelegate*)((cast(void**)context)[1]);
     auto idx = totalThreads >= n ? j : treadId;
     auto p = JJ[idx];
-    if(ipiv[idx]++ == 0)
+    if(iwork[idx]++ == 0)
     {
         copy(x, p);
     }
@@ -1075,6 +1078,7 @@ LMStatus optimizeLMImplGeneric(T)
     import mir.ndslice.topology: canonical, diagonal;
     import mir.utility: max;
     import mir.ndslice.slice: sliced;
+    import mir.optim.boxcqp;
 
     version(LDC) pragma(inline, true);
 
@@ -1115,10 +1119,8 @@ LMStatus optimizeLMImplGeneric(T)
     ++fCalls;
     residual = dot(y, y);
 
-    bool conservative;
-L_conservative:
     T nu = 2;
-    // T mu = 1;
+    T mu = 1;
     T sigma = 0;
 
     int badPredictions;
@@ -1127,7 +1129,7 @@ L_conservative:
     {
         if (!allLessOrEqual(x, x))
             return lm.status = LMStatus.numericError;
-        T mJy_nrm2 = void;
+        T Jy_nrm2 = void;
         T deltaXBase_dot = void;
         if (needJacobian)
         {
@@ -1152,16 +1154,16 @@ L_conservative:
                 else
                 {
                     age = 0;
-                    fill(0, ipiv);
+                    fill(0, iwork);
                     void*[2] context;
                     context[0] = &lm;
                     context[1] = &f;
                     tm(n, context.ptr, &defaultLMThreadManagerDelegate!T);
-                    fCalls += ipiv.sum;
+                    fCalls += iwork.sum;
                 }
             }
-            gemv(-1, J.transposed, y, 0, mJy);
-            mJy_nrm2 = mJy.nrm2;
+            gemv(1, J.transposed, y, 0, Jy);
+            Jy_nrm2 = Jy.nrm2;
         }
 
         syrk(Uplo.Upper, 1, J.transposed, 0, JJ);
@@ -1178,13 +1180,13 @@ L_conservative:
         T sigmaInit = 0;
 
         if (nBuffer.front < 0)
-            sigmaInit = nBuffer.front * -(1 + T.epsilon);
+            sigmaInit = nBuffer.front * -(1 + T.epsilon * 16);
 
-        if (nBuffer.front + sigmaInit < T.epsilon)
-            sigmaInit += T.epsilon;
+        if (nBuffer.front + sigmaInit < T.epsilon * 16)
+            sigmaInit += T.epsilon * 16;
 
-        if (!(mJy_nrm2 / ((nBuffer.front + sigmaInit) * (1 + lambda)) < 0.5f * T.max))
-            sigmaInit = mJy_nrm2 / ((0.5f * T.max) * (1 + lambda)) - nBuffer.front;
+        if (!(Jy_nrm2 / ((nBuffer.front + sigmaInit) * (1 + lambda)) < 0.5f * T.max))
+            sigmaInit = Jy_nrm2 / ((0.5f * T.max) * (1 + lambda)) - nBuffer.front;
         
         if (sigmaInit == 0)
         {
@@ -1196,21 +1198,10 @@ L_conservative:
             sigma = fmax(sigma, sigmaInit);
         }
 
-        gemv(1, JJ, mJy, 0, deltaX);
-
-        if (conservative)
-        {
-            foreach(i; 0 .. n)
-                nBuffer[i] = deltaX[i] / ((nBuffer[i] + sigma) + lambda);
-        }
-        else
-        {
-            foreach(i; 0 .. n)
-                nBuffer[i] = deltaX[i] / ((nBuffer[i] + sigma) * (1 + lambda));
-        }
-
-        gemv(1, JJ.transposed, nBuffer, 0, deltaX);
-
+        nBuffer[] = (nBuffer + sigma) * (1 + lambda);
+        gemv(-1, JJ, Jy, 0, deltaX);
+        _work[0 .. n] = deltaX * (1 / nBuffer);
+        gemv(1, JJ.transposed, _work[0 .. n], 0, deltaX);
         axpy(1, x, deltaX);
 
         version(mir_optim_debug)
@@ -1231,24 +1222,27 @@ L_conservative:
 
         if (needsQP)
         {
-            import mir.optim.boxcqp;
             import mir.rc.array;
             import mir.algorithm.iteration;
 
-            JJ[] = 0;
-            import mir.math;
-            syrk(Uplo.Lower, 2, J.transposed, 0, JJ);
-            JJ.diagonal[] += sigma;
-            if (conservative)
-                JJ.diagonal[] += lambda;
-            else
-                JJ.diagonal[] *= (1 + lambda);
-            JJ.eachUploPair!("a = b", false);
+            {
+                auto TT = _work[0 .. n^^2].sliced(n, n);
+                TT[] = JJ;
+                foreach (i; 0 .. n)
+                    scal(nBuffer[i].sqrt, TT[i]);
+                syrk(Uplo.Lower, 1, TT.transposed, 0, JJ);
+                JJ.eachUploPair!("a = b", false);
+            }
 
-            auto q = rcarray(-mJy);
-            auto l = rcarray(lower - x);
-            auto u = rcarray(upper - x);
-            solveQP(JJ.canonical, q[].sliced, l[].sliced, u[].sliced, deltaX);
+            auto l = _work[0 .. n];
+            auto u = _work[n .. n * 2];
+            l[] = lower - x;
+            u[] = upper - x;
+            BoxQPSettings!T settings;
+            if (settings.solveBoxQP(JJ.canonical, Jy, l, u, deltaX, _work[2 * n .. $], iwork, bwork) != BoxQPStatus.solved)
+            {
+                return lm.status = LMStatus.numericError;
+            }
             axpy(1, x, deltaX);
         }
 
@@ -1267,7 +1261,7 @@ L_conservative:
             {
                 needJacobian = true;
                 age = maxAge;
-                if (conservative || ++badPredictions < 8)
+                if (++badPredictions < 8)
                     continue;
                 else
                     break;
@@ -1307,7 +1301,6 @@ L_conservative:
                 assumePure(&fprintf)(file, "%e ", e);
             }
             assumePure(&fprintf)(file, "\n");
-            assumePure(&fprintf)(file, "conservative = %d\n", conservative);
             assumePure(&fprintf)(file, "lambda = %e\n", lambda);
             assumePure(&fprintf)(file, "sigma = %e\n", sigma);
             // assumePure(&fprintf)(file, "mu = %e\n", mu);
@@ -1362,7 +1355,7 @@ L_conservative:
                 lambda = fmax(lambdaDecrease * lambda, minLambda);
                 sigma = sigma * 0.5;
                 nu = 2;
-                // mu = 1;
+                mu = 1;
             }
         }
         else
@@ -1371,13 +1364,12 @@ L_conservative:
                 break;
 
             auto newsigma = sigma * nu;
-            // auto newlambda = lambdaIncrease * lambda * mu;
-            auto newlambda = lambdaIncrease * lambda;
-            if (newsigma > T.max / 8)
+            auto newlambda = lambdaIncrease * lambda * mu;
+            if (newsigma > T.max / 16)
                 newsigma = sigma + sigma;
             if (newlambda > maxLambda)
                 newlambda = lambda + lambda;
-            if (newlambda > maxLambda || newsigma > T.max / 8)
+            if (newlambda > maxLambda || newsigma > T.max / 16)
             {
                 if (age == 0)
                 {
@@ -1390,24 +1382,19 @@ L_conservative:
                     continue;
                 }
             }
-            nu += nu;
-            // mu += mu;
+            if (newsigma)
+                nu *= 2;
+            else
+                nu = 2;
+            mu *= 2;
             lambda = newlambda;
             sigma = newsigma;
         }
     }
     while (iterCt < maxIter);
 
-    if (!conservative && iterCt < maxIter && !fConverged && !gConverged)
-    {
-        conservative = true;
-        lambda = 0;
-        goto L_conservative;
-    }
-
     version(mir_optim_debug)
     {
-        assumePure(&fprintf)(file, "conservative = %d\n", conservative);
         assumePure(&fprintf)(file, "iterCt < maxIter = %d\n", iterCt < maxIter);
         assumePure(&fprintf)(file, "fConverged = %d\n", fConverged);
         assumePure(&fprintf)(file, "gConverged = %d\n", gConverged);
