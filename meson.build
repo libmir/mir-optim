@@ -1,4 +1,4 @@
-project('mir-optim', 'd', 'c', version : '1.0.0', license: 'BSL-1.0')
+project('mir-optim', 'd', version : '1.0.0', license: 'BSL-1.0')
 
 cblas_d_dep = dependency('cblas-d', fallback : ['cblas', 'cblas_dep'])
 lapack_d_dep = dependency('lapack-d', fallback : ['lapack', 'lapack_dep'])
@@ -23,7 +23,7 @@ if target_machine.system() == 'linux'
     required_deps = [required_deps, mir_linux_kernel_dep]
 endif
 
-mir_optim_dir = include_directories('source/', 'include/')
+mir_optim_dir = include_directories('source/')
 
 mir_optim_src = [
     'source/mir/optim/least_squares.d',
@@ -67,7 +67,7 @@ if get_option('with_test')
         mir_optim_src,
         include_directories: mir_optim_dir,
         d_unittest: true,
-        d_module_versions: ['mir_test', 'DLONG'],
+        d_module_versions: ['mir_optim_test'],
         link_args: '-main',
         dependencies: required_deps,
     )
