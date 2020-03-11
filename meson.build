@@ -36,18 +36,12 @@ mir_optim_lib = library(meson.project_name(),
     install: true,
     version: meson.project_version(),
     dependencies: required_deps,
-    d_module_versions: ['mir_test'],
 )
 
 mir_optim_dep = declare_dependency(
     link_with: [mir_optim_lib],
     include_directories: mir_optim_dir,
     dependencies: required_deps,
-)
-
-install_subdir('include/',
-    strip_directory :true,
-    install_dir: 'include/',
 )
 
 install_subdir('source/',
