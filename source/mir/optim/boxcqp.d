@@ -85,7 +85,10 @@ BoxQPStatus solveBoxQP(T)(
     auto work = rcslice!T(boxQPWorkLength(n));
     auto bwork = rcslice!byte(n);
     auto iwork = rcslice!lapackint(n);
-    return solveBoxQP(settings, P, q, l, u, x, work.lightScope, iwork.lightScope, bwork.lightScope);
+    auto workS = work.lightScope;
+    auto iworkS = iwork.lightScope;
+    auto bworkS = bwork.lightScope;
+    return solveBoxQP(settings, P, q, l, u, x, false, workS, iworkS, bworkS);
 }
 
 /++
@@ -101,6 +104,7 @@ Params:
     work = workspace, boxQPWorkLength(N)
     iwork = integer workspace, N
     bwork = byte workspace, N
+    xContainsUnconstraintSolution = 
 +/
 @safe pure nothrow @nogc
 BoxQPStatus solveBoxQP(T)(
@@ -110,6 +114,7 @@ BoxQPStatus solveBoxQP(T)(
     Slice!(const(T)*) l,
     Slice!(const(T)*) u,
     Slice!(T*) x,
+    bool unconstrainedSolution,
     Slice!(T*) work,
     Slice!(lapackint*) iwork,
     Slice!(byte*) bwork,
@@ -145,15 +150,7 @@ do {
     if (n == 0)
         return BoxQPStatus.solved;
 
-    auto flags = (()@trusted=>(cast(Flag*)bwork.ptr).sliced(n))();
-
-    auto maxIterations = cast()settings.maxIterations;
-    if (!maxIterations)
-        maxIterations = cast(uint)n * 10 + 100; // fix
-
-    auto la  = work[0 .. n]; work = work[n .. $];
-    auto mu  = work[0 .. n]; work = work[n .. $];
-
+    if (!unconstrainedSolution)
     {
         auto buffer = work;
         auto scaling = buffer[0 .. n]; buffer = buffer[n .. $];
@@ -184,13 +181,23 @@ do {
             return BoxQPStatus.numericError;
     }
 
-    la[] = 0;
-    mu[] = 0;
-
     foreach (i; 0 .. n)
         if (!(l[i] <= x[i] && x[i] <= u[i]))
-            goto MainLoop;
+            goto Start;
     return BoxQPStatus.solved;
+
+Start:
+    auto flags = (()@trusted=>(cast(Flag*)bwork.ptr).sliced(n))();
+
+    auto maxIterations = cast()settings.maxIterations;
+    if (!maxIterations)
+        maxIterations = cast(uint)n * 10 + 100; // fix
+
+    auto la  = work[0 .. n]; work = work[n .. $];
+    auto mu  = work[0 .. n]; work = work[n .. $];
+
+    la[] = 0;
+    mu[] = 0;
 
     MainLoop: foreach (step; 0 .. maxIterations)
     {
@@ -201,14 +208,14 @@ do {
             {
                 auto xl = x[i] - l[i];
                 auto ux = u[i] - x[i];
-                if (xl < 0 || xl < relTolerance.fmax(absTolerance * l[i].fabs) && la[i] >= 0)
+                if (xl < 0 || xl < relTolerance + absTolerance * l[i].fabs && la[i] >= 0)
                 {
                     flags[i] = Flag.l;
                     x[i] = l[i];
                     mu[i] = 0;
                 }
                 else
-                if (ux < 0 || ux < relTolerance.fmax(absTolerance * u[i].fabs) && mu[i] >= 0)
+                if (ux < 0 || ux < relTolerance + absTolerance * u[i].fabs && mu[i] >= 0)
                 {
                     flags[i] = Flag.u;
                     x[i] = u[i];
@@ -294,6 +301,21 @@ do {
 
         foreach (i; 0 .. n)
             x[i] = x[i].fmin(u[i]).fmax(l[i]);
+
+        version(none)
+        {
+            import std.traits, std.meta;
+            static auto assumePure(T)(T t)
+            if (isFunctionPointer!T || isDelegate!T)
+            {
+                enum attrs = functionAttributes!T | FunctionAttribute.pure_;
+                return cast(SetFunctionAttributes!(T, functionLinkage!T, attrs)) t;
+            }
+
+            import core.stdc.stdio;
+            (()@trusted => cast(void) assumePure(&printf)("#### BOXCQP iters = %d\n", step + 1))();
+        }
+
         return BoxQPStatus.solved;
     }
 

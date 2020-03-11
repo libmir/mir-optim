@@ -75,12 +75,13 @@ struct LeastSquaresLM(T)
 
     import mir.optim.boxcqp;
     import mir.math.common: sqrt;
+    import mir.math.constant: GoldenRatio;
     import lapack: lapackint;
 
     /// Default tolerance in x
-    enum T tolXDefault = T(2) ^^ ((1 - T.mant_dig) / 2);
+    enum T tolXDefault = T.epsilon;;
     /// Default tolerance in gradient
-    enum T tolGDefault = T(2) ^^ ((1 - T.mant_dig) * 3 / 4);
+    enum T tolGDefault = T.epsilon; //T(2) ^^ ((1 - T.mant_dig) * 3 / 4);
     /// Default value for `maxGoodResidual`.
     enum T maxGoodResidualDefault = T.epsilon;
     /// Default epsilon for finite difference Jacobian approximation
@@ -88,7 +89,7 @@ struct LeastSquaresLM(T)
     /// Default `lambda` is multiplied by this factor after step below min quality
     enum T lambdaIncreaseDefault = 4;
     /// Default `lambda` is multiplied by this factor after good quality steps
-    enum T lambdaDecreaseDefault = 0.25 / 1.618;
+    enum T lambdaDecreaseDefault = 1 / (GoldenRatio * lambdaIncreaseDefault);
     /// Default scale such as for steps below this quality, the trust region is shrinked
     enum T minStepQualityDefault = 0.1;
     /// Default scale such as for steps above thsis quality, the trust region is expanded
@@ -1105,7 +1106,7 @@ LMStatus optimizeLMImplGeneric(T)
     if (!(T.min_normal.sqrt <= lambdaDecrease && lambdaDecrease <= 1))
         return lm.status = LMStatus.badLambdaParams;
 
-    maxAge = maxAge ? maxAge : g ? 3 : cast(uint)(2 * n);
+    maxAge = maxAge ? maxAge : g ? 3 : 2 * cast(uint)n;
     uint age = maxAge;
 
     tm = tm ? tm : delegate(size_t count, void* taskContext, scope LeastSquaresTask task) pure @nogc nothrow @trusted
@@ -1119,11 +1120,13 @@ LMStatus optimizeLMImplGeneric(T)
     ++fCalls;
     residual = dot(y, y);
 
-    T nu = 2;
     T mu = 1;
-    T sigma = 0;
 
     int badPredictions;
+
+    import mir.algorithm.iteration: count;
+    import core.stdc.stdio;
+    // cast(void) assumePure(&printf)("#### ITERATE ---------\n\n\n");
 
     do
     {
@@ -1177,31 +1180,30 @@ LMStatus optimizeLMImplGeneric(T)
                 lambda = 1;
         }
 
-        T sigmaInit = 0;
+        T sigma = 0;
 
-        if (nBuffer.front < 0)
-            sigmaInit = nBuffer.front * -(1 + T.epsilon * 16);
-
-        if (nBuffer.front + sigmaInit < T.epsilon * 16)
-            sigmaInit += T.epsilon * 16;
-
-        if (!(Jy_nrm2 / ((nBuffer.front + sigmaInit) * (1 + lambda)) < 0.5f * T.max))
-            sigmaInit = Jy_nrm2 / ((0.5f * T.max) * (1 + lambda)) - nBuffer.front;
-        
-        if (sigmaInit == 0)
+        if (nBuffer[0] < 0)
+            sigma = nBuffer[0] * -(1 + T.epsilon * 16);
+        if (nBuffer[0] + sigma < T.epsilon * 16)
+            sigma += T.epsilon * 16;
+        if (true) 
         {
-            sigma = 0;
-            nu = 2;
+            if (!(Jy_nrm2 / ((nBuffer[0] + sigma) * (1 + lambda)) < 0.5f * T.max))
+                sigma = Jy_nrm2 / ((0.5f * T.max * (1 + lambda))) - nBuffer[0];
+
+            nBuffer[] = ((nBuffer + sigma) * (1 + lambda));
         }
         else
         {
-            sigma = fmax(sigma, sigmaInit);
-        }
+            if (!(Jy_nrm2 / ((nBuffer[0] + (sigma + lambda))) < 0.5f * T.max))
+                sigma = Jy_nrm2 / ((0.5f * T.max + (sigma + lambda))) - nBuffer[0];
 
-        nBuffer[] = (nBuffer + sigma) * (1 + lambda);
+            nBuffer[] = ((nBuffer + (sigma + lambda)));
+        }
         gemv(-1, JJ, Jy, 0, deltaX);
         _work[0 .. n] = deltaX * (1 / nBuffer);
         gemv(1, JJ.transposed, _work[0 .. n], 0, deltaX);
+        _work[0 .. n] = deltaX;
         axpy(1, x, deltaX);
 
         version(mir_optim_debug)
@@ -1219,12 +1221,11 @@ LMStatus optimizeLMImplGeneric(T)
             needsQP = applyLowerBound(deltaX, lower) || needsQP;
         if (_upper_ptr)
             needsQP = applyUpperBound(deltaX, upper) || needsQP;
-
         if (needsQP)
         {
             import mir.rc.array;
             import mir.algorithm.iteration;
-
+            deltaX[] = _work[0 .. n];
             {
                 auto TT = _work[0 .. n^^2].sliced(n, n);
                 TT[] = JJ;
@@ -1239,7 +1240,9 @@ LMStatus optimizeLMImplGeneric(T)
             l[] = lower - x;
             u[] = upper - x;
             BoxQPSettings!T settings;
-            if (settings.solveBoxQP(JJ.canonical, Jy, l, u, deltaX, _work[2 * n .. $], iwork, bwork) != BoxQPStatus.solved)
+            settings.absTolerance = T.epsilon * 16;
+            settings.relTolerance = T.epsilon * 16;
+            if (settings.solveBoxQP(JJ.canonical, Jy, l, u, deltaX, true, _work[2 * n .. $], iwork, bwork) != BoxQPStatus.solved)
             {
                 return lm.status = LMStatus.numericError;
             }
@@ -1315,6 +1318,9 @@ LMStatus optimizeLMImplGeneric(T)
             assumePure(&fflush)(file);
         }
 
+        import mir.algorithm.iteration: count;
+        import core.stdc.stdio;
+        // cast(void) assumePure(&printf)("#### LAMBDA = %e\n", lambda);
 
         if (improvement > 0)
         {
@@ -1327,16 +1333,21 @@ LMStatus optimizeLMImplGeneric(T)
             residual = trialResidual;
             needJacobian = true;
         }
+        enum maxMu = 1;
         if (rho > minStepQuality && improvement > 0)
         {
             gemv(1, J.transposed, y, 0, nBuffer);
             gConverged = !(nBuffer.amax > tolG);
-            xConverged = !(deltaXBase_dot.sqrt > tolX * (tolX + x.nrm2));
+            xConverged = !(deltaXBase_dot.sqrt > tolX);// fmax(tolX, tolX * x.nrm2));
 
-            if (gConverged || xConverged)
+            if (gConverged && age == 0)
+                break;
+            if (xConverged)
             {
-                if (age)
+                if (age) //|| rho > goodStepQuality && mu == maxMu
                 {
+                    lambda = fmax(lambdaDecrease * lambda, minLambda);
+                    mu = 1;
                     gConverged = false;
                     xConverged = false;
                     age = maxAge;
@@ -1353,8 +1364,6 @@ LMStatus optimizeLMImplGeneric(T)
             if (rho > goodStepQuality)
             {
                 lambda = fmax(lambdaDecrease * lambda, minLambda);
-                sigma = sigma * 0.5;
-                nu = 2;
                 mu = 1;
             }
         }
@@ -1363,13 +1372,13 @@ LMStatus optimizeLMImplGeneric(T)
             if (fConverged)
                 break;
 
-            auto newsigma = sigma * nu;
             auto newlambda = lambdaIncrease * lambda * mu;
-            if (newsigma > T.max / 16)
-                newsigma = sigma + sigma;
             if (newlambda > maxLambda)
+            {
+                mu = 1;
                 newlambda = lambda + lambda;
-            if (newlambda > maxLambda || newsigma > T.max / 16)
+            }
+            if (newlambda > maxLambda)
             {
                 if (age == 0)
                 {
@@ -1382,13 +1391,9 @@ LMStatus optimizeLMImplGeneric(T)
                     continue;
                 }
             }
-            if (newsigma)
-                nu *= 2;
-            else
-                nu = 2;
-            mu *= 2;
+            if (mu < maxMu)
+                mu *= 2;
             lambda = newlambda;
-            sigma = newsigma;
         }
     }
     while (iterCt < maxIter);
