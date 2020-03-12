@@ -1,5 +1,0 @@
-[wrap-git]
-directory=osqp
-url=https://github.com/9il/osqp.git
-revision=head
-clone-recursive=true
