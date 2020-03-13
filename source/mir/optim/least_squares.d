@@ -16,6 +16,8 @@ import std.traits;
   
 public import std.typecons: Flag, Yes, No;
 
+version = mir_optim_test;
+
 ///
 enum LMStatus
 {
@@ -95,34 +97,23 @@ struct LeastSquaresLM(T)
     /// Default scale such as for steps above thsis quality, the trust region is expanded
     enum T goodStepQualityDefault = 0.68;
     /// Default maximum trust region radius
-    enum T maxLambdaDefault = 1 / T.epsilon;
+    enum T maxLambdaDefault = T.max / 16;
     /// Default maximum trust region radius
-    enum T minLambdaDefault = T.epsilon;
+    enum T minLambdaDefault = T.min_normal * 16;
 
     /// Delegates for low level D API.
-    alias FunctionDelegate = void delegate(Slice!(const(T)*) x, Slice!(T*) y) @safe nothrow @nogc pure;
+    alias Function = void delegate(Slice!(const(T)*) x, Slice!(T*) y) @safe nothrow @nogc pure;
     /// ditto
-    alias JacobianDelegate = void delegate(Slice!(const(T)*) x, Slice!(T*, 2) J) @safe nothrow @nogc pure;
+    alias Jacobian = void delegate(Slice!(const(T)*) x, Slice!(T*, 2) J) @safe nothrow @nogc pure;
 
     /// Delegates for low level C API.
-    alias FunctionFunction = extern(C) void function(void* context, size_t m, size_t n, const(T)* x, T* y) @system nothrow @nogc pure;
+    alias FunctionBetterC = extern(C) void function(scope void* context, size_t m, size_t n, const(T)* x, T* y) @system nothrow @nogc pure;
     ///
-    alias JacobianFunction = extern(C) void function(void* context, size_t m, size_t n, const(T)* x, T* J) @system nothrow @nogc pure;
+    alias JacobianBetterC = extern(C) void function(scope void* context, size_t m, size_t n, const(T)* x, T* J) @system nothrow @nogc pure;
 
     private T* _lower_ptr;
     private T* _upper_ptr;
     private T* _x_ptr;
-    private T* _deltaX_ptr;
-    private T* _deltaXBase_ptr;
-    private T* _Jy_ptr;
-    private lapackint* _iwork_ptr;
-    private byte* _bwork_ptr;
-    private T* _y_ptr;
-    private T* _mBuffer_ptr;
-    private T* _nBuffer_ptr;
-    private T* _JJ_ptr;
-    private T* _J_ptr;
-    private Slice!(T*) _work;
 
     /++
     Y = f(X) dimension.
@@ -139,7 +130,7 @@ struct LeastSquaresLM(T)
     size_t n;
 
     /// maximum number of iterations
-    size_t maxIter;
+    uint maxIter;
     /// tolerance in x
     T tolX = 0;
     /// tolerance in gradient
@@ -236,23 +227,6 @@ struct LeastSquaresLM(T)
         Returns: Current X vector.
         +/
         Slice!(T*) x() { return Slice!(T*)([n], _x_ptr); }
-        /++
-        Returns: The last success ΔX.
-        +/
-        Slice!(T*) deltaX() { return Slice!(T*)([n], _deltaX_ptr); }
-        /++
-        Returns: Current Y = f(X).
-        +/
-        Slice!(T*) y() { return Slice!(T*)([m], _y_ptr); }
-    private:
-        Slice!(T*) Jy() { return Slice!(T*)([n], _Jy_ptr); }
-        Slice!(T*) deltaXBase() { return Slice!(T*)([n], _deltaXBase_ptr); }
-        Slice!(lapackint*) iwork() { return Slice!(lapackint*)([n], _iwork_ptr); }
-        Slice!(byte*) bwork() { return Slice!(byte*)([n], _bwork_ptr); }
-        Slice!(T*) mBuffer() { return Slice!(T*)([m], _mBuffer_ptr); }
-        Slice!(T*) nBuffer() { return Slice!(T*)([n], _nBuffer_ptr); }
-        Slice!(T*, 2) JJ() { return Slice!(T*, 2)([n, n], _JJ_ptr); }
-        Slice!(T*, 2) J() { return Slice!(T*, 2)([m, n], _J_ptr); }
     }
 
     /++
@@ -271,7 +245,6 @@ struct LeastSquaresLM(T)
         xConverged = false;
         gConverged = false;    
         fill(T.nan, x);
-        fill(T.nan, y);
         fill(-T.infinity, lower);
         fill(+T.infinity, upper);
     }
@@ -313,18 +286,7 @@ struct LeastSquaresLM(T)
         _upper_ptr = [n].uninitSlice!T._iterator;
         lower[] = -T.infinity;
         upper[] = +T.infinity;
-        _iwork_ptr = [n].uninitSlice!lapackint._iterator;
-        _bwork_ptr = [n].uninitSlice!byte._iterator;
         _x_ptr = [n].uninitSlice!T._iterator;
-        _deltaX_ptr = [n].uninitSlice!T._iterator;
-        _Jy_ptr = [n].uninitSlice!T._iterator;
-        _deltaXBase_ptr = [n].uninitSlice!T._iterator;
-        _y_ptr = [m].uninitSlice!T._iterator;
-        _mBuffer_ptr = [m].uninitSlice!T._iterator;
-        _nBuffer_ptr = [n].uninitSlice!T._iterator;
-        _JJ_ptr = [n, n].uninitSlice!T._iterator;
-        _J_ptr = [m, n].uninitSlice!T._iterator;
-        _work = [boxQPWorkLength(n) + n * 2].uninitSlice!T;
         reset;
     }
 
@@ -334,7 +296,7 @@ struct LeastSquaresLM(T)
     pragma(inline, false)
     void stdcAlloc()(size_t m, size_t n, bool lowerBounds = false, bool upperBounds = false) nothrow @nogc @trusted
     {
-        import mir.ndslice.allocation: stdcUninitSlice, stdcUninitAlignedSlice;
+        import mir.ndslice.allocation: stdcUninitSlice;
         import mir.ndslice.slice: sliced;
         import mir.ndslice.topology: canonical;
 
@@ -346,18 +308,7 @@ struct LeastSquaresLM(T)
         _upper_ptr = [n].stdcUninitSlice!T._iterator;
         lower[] = -T.infinity;
         upper[] = +T.infinity;
-        _iwork_ptr = [n].stdcUninitSlice!lapackint._iterator;
-        _bwork_ptr = [n].stdcUninitSlice!byte._iterator;
-        _x_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _deltaX_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _Jy_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _deltaXBase_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _y_ptr = [m].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _mBuffer_ptr = [m].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _nBuffer_ptr = [n].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _JJ_ptr = [n, n].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _J_ptr = [m, n].stdcUninitAlignedSlice!T(alignment)._iterator;
-        _work = [boxQPWorkLength(n) + n * 2].stdcUninitAlignedSlice!T(alignment);
+        _x_ptr = [n].stdcUninitSlice!T._iterator;
         reset;
     }
 
@@ -368,20 +319,9 @@ struct LeastSquaresLM(T)
     void stdcFree()() nothrow @nogc @trusted
     {
         import core.stdc.stdlib: free;
-        if (_lower_ptr) _lower_ptr.free;
-        if (_upper_ptr) _upper_ptr.free;
-        _iwork_ptr.free;
-        _bwork_ptr.free;
+        _lower_ptr.free;
+        _upper_ptr.free;
         _x_ptr.free;
-        _deltaX_ptr.free;
-        _Jy_ptr.free;
-        _deltaXBase_ptr.free;
-        _y_ptr.free;
-        _mBuffer_ptr.free;
-        _nBuffer_ptr.free;
-        _JJ_ptr.free;
-        _J_ptr.free;
-        _work._iterator.free;
     }
 
     // size_t toHash() @safe pure nothrow @nogc
@@ -425,18 +365,18 @@ void optimize(alias f, alias g = null, alias tm = null, T)(scope ref LeastSquare
 void optimize(alias f, TaskPool, T)(scope ref LeastSquaresLM!T lm, TaskPool taskPool)
     if (is(T == float) || is(T == double))
 {
-    auto tm = delegate(size_t count, void* taskContext, scope LeastSquaresTask task)
+    auto tm = delegate(uint count, scope LeastSquaresTask task)
     {
         version(all)
         {
             import mir.ndslice.topology: iota;
-            foreach(i; taskPool.parallel(count.iota))
-                task(taskContext, taskPool.size, taskPool.size <= 1 ? 0 : taskPool.workerIndex - 1, i);
+            foreach(i; taskPool.parallel(count.iota!uint))
+                task(cast(uint)taskPool.size, cast(uint)(taskPool.size <= 1 ? 0 : taskPool.workerIndex - 1), i);
         }
         else // for debug
         {
             foreach(i; 0 .. count)
-                task(taskContext, 1, 0, i);
+                task(1, 0, i);
         }
     };
     if (auto err = optimizeImpl!(f, null, tm, T)(lm))
@@ -668,10 +608,14 @@ LMStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(scope ref Lea
     {
         f(x, y);
     };
-    if (false) with(lm)
+    if (false)
+    {
+        Slice!(const(T)*) x;
+        Slice!(T*) y;
         fInst(x, y);
+    }
     static if (is(typeof(g) == typeof(null)))
-        enum LeastSquaresLM!T.JacobianDelegate gInst = null;
+        enum LeastSquaresLM!T.Jacobian gInst = null;
     else
     {
         auto gInst = delegate(Slice!(const(T)*) x, Slice!(T*, 2) J)
@@ -681,47 +625,34 @@ LMStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(scope ref Lea
         static if (isNullableFunction!(g))
             if (!g)
                 gInst = null;
-        if (false) with(lm)
+        if (false)
+        {
+            Slice!(const(T)*) x;
+            Slice!(T*, 2) J;
             gInst(x, J);
+        }
     }
 
     static if (is(typeof(tm) == typeof(null)))
-        enum LeastSquaresThreadManagerDelegate tmInst = null;
+        enum LeastSquaresThreadManager tmInst = null;
     else
     {
         auto tmInst = delegate(
-            size_t count,
-            void* taskContext,
+            uint count,
             scope LeastSquaresTask task)
         {
-            tm(count, taskContext, task);
+            tm(count, task);
         };
         // auto tmInst = &tmInstDec;
         static if (isNullableFunction!(tm))
             if (!tm)
                 tmInst = null;
         if (false) with(lm)
-            tmInst(0, null, null);
+            tmInst(0, null);
     }
     alias TM = typeof(tmInst);
     return optimizeLeastSquaresLM!T(lm, fInst.trustedAllAttr, gInst.trustedAllAttr,  tmInst.trustedAllAttr);
 }
-
-// extern (C) void delegate(ulong count, void* taskContext, extern (C) void function(void*, ulong, ulong, ulong) pure nothrow @nogc @safe task) @system 
-// extern (C) void delegate(ulong count, void* taskContext, extern (C) void function(void*, ulong, ulong, ulong) pure nothrow @nogc @safe task) pure nothrow @nogc @safe
-
-// extern (C) void delegate(ulong count, void* taskContext, scope extern (C) void function(void*, ulong, ulong, ulong) pure nothrow @nogc @safe task) @system 
-// extern (C) void delegate(ulong count, void* taskContext, extern (C) void function(void* context, ulong totalThreads, ulong treadId, ulong i) pure nothrow @nogc @safe task) pure nothrow @nogc @safe
-// void delegate(ulong, void*, scope extern (C) void function(void*, ulong, ulong, ulong) pure nothrow @nogc @safe) pure nothrow @nogc @safe to parameter scope extern (C) void delegate(ulong count, void* taskContext, extern (C) void function(void* context, ulong totalThreads, ulong treadId, ulong i) pure nothrow @nogc @safe task) pure nothrow @nogc @safe tm= cast(extern (C) void delegate(ulong count, void* taskContext, extern (C) void function(void* context, ulong totalThreads, ulong treadId, ulong i) pure nothrow @nogc @safe task) pure nothrow @nogc @safe)null
-
-// optimizeLeastSquaresLMD(scope extern (C) void delegate(ulong count, void* taskContext, scope extern (C) void function(void* context, ulong totalThreads, ulong treadId, ulong i) pure nothrow @nogc @safe task) pure nothrow @nogc @safe tm = cast(extern (C) void delegate(ulong count, void* taskContext, scope extern (C) void function(void* context, ulong totalThreads,ulong treadId, ulong i) pure nothrow @nogc @safe task) pure nothrow @nogc @safe)null) is not callable using argument types (LeastSquaresLM!double, void delegate(Slice!(cast(SliceKind)2, [1LU], const(double)*), Slice!(cast(SliceKind)2, [1LU], double*)) pure nothrow @nogc @safe, void delegate(Slice!(cast(SliceKind)2, [1LU], const(double)*), Slice!(cast(SliceKind)2, [2LU], double*)) pure nothrow @nogc @safe, void delegate(ulong, void*, scope void function(void*, ulong, ulong, ulong) pure nothrow @nogc @safe) pure nothrow @nogc @safe)
-// source/mir/least_squares.d(613,36):        cannot pass argument trustedAllAttr(tmInst) of type void delegate(ulong, void*, scope void function(void*, ulong, ulong, ulong) pure nothrow @nogc @safe) pure nothrow @nogc @safe to parameter scope extern (C) void delegate(ulong count, void* taskContext, scope extern (C) void function(void* context, ulong totalThreads, ulong treadId, ulong i) pure nothrow @nogc @safe task) pure nothrow @nogc @safe tm = cas
-
-// void delegate(
-//     Slice!(cast(SliceKind)2, [1LU], const(double)*),
-//     Slice!(cast(SliceKind)2, [1LU], double*)) pure nothrow @nogc @safe,
-//     void delegate (
-//         Slice!(cast(SliceKind)2, [1LU], const(double)*), Slice!(cast(SliceKind)2, [2LU], double*)) pure nothrow @nogc @safe, void delegate(ulong, void*, scope void function(void*, ulong, ulong, ulong) pure nothrow @nogc @safe) pure nothrow @nogc @safe)
 
 /++
 Status string for low (extern) and middle (nothrow) levels D API.
@@ -756,19 +687,25 @@ string lmStatusString(LMStatus st) @safe pure nothrow @nogc
 }
 
 ///
-alias LeastSquaresTask = extern(C) void function(
-                void* context,
-                size_t totalThreads,
-                size_t treadId,
-                size_t i)
-            @safe nothrow @nogc pure;
+alias LeastSquaresTask = void delegate(
+        uint totalThreads,
+        uint threadId,
+        uint i)
+    @safe nothrow @nogc pure;
+
+///
+alias LeastSquaresTaskBetterC = extern(C) void function(
+        scope ref const LeastSquaresTask,
+        uint totalThreads,
+        uint threadId,
+        uint i)
+    @safe nothrow @nogc pure;
 
 /// Thread manager delegate type for low level `extern(D)` API.
-alias LeastSquaresThreadManagerDelegate = void delegate(
-        size_t count,
-        void* taskContext,
-        scope LeastSquaresTask task,
-        )@safe nothrow @nogc pure;
+alias LeastSquaresThreadManager = void delegate(
+        uint count,
+        scope LeastSquaresTask task)
+    @safe nothrow @nogc pure;
 
 /++
 Low level `extern(D)` instatiation.
@@ -782,9 +719,9 @@ pragma(inline, false)
 LMStatus optimizeLeastSquaresLMD
     (
         scope ref LeastSquaresLM!double lm,
-        scope LeastSquaresLM!double.FunctionDelegate f,
-        scope LeastSquaresLM!double.JacobianDelegate g = null,
-        scope LeastSquaresThreadManagerDelegate tm = null,
+        scope LeastSquaresLM!double.Function f,
+        scope LeastSquaresLM!double.Jacobian g = null,
+        scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
     return optimizeLMImplGeneric!double(lm, f, g, tm);
@@ -796,9 +733,9 @@ pragma(inline, false)
 LMStatus optimizeLeastSquaresLMS
     (
         scope ref LeastSquaresLM!float lm,
-        scope LeastSquaresLM!float.FunctionDelegate f,
-        scope LeastSquaresLM!float.JacobianDelegate g = null,
-        scope LeastSquaresThreadManagerDelegate tm = null,
+        scope LeastSquaresLM!float.Function f,
+        scope LeastSquaresLM!float.Jacobian g = null,
+        scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
     return optimizeLMImplGeneric!float(lm, f, g, tm);
@@ -826,12 +763,12 @@ extern(C) @safe nothrow @nogc
     }
 
     /// Thread manager function type for low level `extern(C)` API.
-    alias LeastSquaresThreadManagerFunction =
+    alias LeastSquaresThreadManagerBetterC =
         extern(C) void function(
-            void* context,
-            size_t count,
-            void* taskContext,
-            scope LeastSquaresTask task)
+            scope void* context,
+            uint count,
+            scope ref const LeastSquaresTask taskContext,
+            scope LeastSquaresTaskBetterC task)
             @system nothrow @nogc pure;
 
     /++
@@ -850,11 +787,11 @@ extern(C) @safe nothrow @nogc
         (
             scope ref LeastSquaresLM!double lm,
             scope void* fContext,
-            scope LeastSquaresLM!double.FunctionFunction f,
+            scope LeastSquaresLM!double.FunctionBetterC f,
             scope void* gContext = null,
-            scope LeastSquaresLM!double.JacobianFunction g = null,
+            scope LeastSquaresLM!double.JacobianBetterC g = null,
             scope void* tmContext = null,
-            scope LeastSquaresThreadManagerFunction tm = null,
+            scope LeastSquaresThreadManagerBetterC tm = null,
         ) @system nothrow @nogc pure
     {
         return optimizeLMImplGenericBetterC!double(lm, fContext, f, gContext, g, tmContext, tm);
@@ -867,11 +804,11 @@ extern(C) @safe nothrow @nogc
         (
             scope ref LeastSquaresLM!float lm,
             scope void* fContext,
-            scope LeastSquaresLM!float.FunctionFunction f,
+            scope LeastSquaresLM!float.FunctionBetterC f,
             scope void* gContext = null,
-            scope LeastSquaresLM!float.JacobianFunction g = null,
+            scope LeastSquaresLM!float.JacobianBetterC g = null,
             scope void* tmContext = null,
-            scope LeastSquaresThreadManagerFunction tm = null,
+            scope LeastSquaresThreadManagerBetterC tm = null,
         ) @system nothrow @nogc pure
     {
         return optimizeLMImplGenericBetterC!float(lm, fContext, f, gContext, g, tmContext, tm);
@@ -982,11 +919,11 @@ LMStatus optimizeLMImplGenericBetterC(T)
     (
         scope ref LeastSquaresLM!T lm,
         scope void* fContext,
-        scope LeastSquaresLM!T.FunctionFunction f,
+        scope LeastSquaresLM!T.FunctionBetterC f,
         scope void* gContext,
-        scope LeastSquaresLM!T.JacobianFunction g,
+        scope LeastSquaresLM!T.JacobianBetterC g,
         scope void* tmContext,
-        scope LeastSquaresThreadManagerFunction tm,
+        scope LeastSquaresThreadManagerBetterC tm,
     ) @system nothrow @nogc pure
 {
     version(LDC) pragma(inline, true);
@@ -997,11 +934,18 @@ LMStatus optimizeLMImplGenericBetterC(T)
             (x, J) @trusted => g(gContext, J.length, x.length, x.iterator, J.iterator),
             null
         );
+
+    LeastSquaresTaskBetterC taskFunction = (scope ref const LeastSquaresTask context, uint totalThreads, uint threadId, uint i) @trusted
+    {
+        context(totalThreads, threadId, i);
+    };
+
     if (tm)
         return optimizeLeastSquaresLM!T(
             lm,
             (x, y) @trusted => f(fContext, y.length, x.length, x.iterator, y.iterator),
-            null, (count, taskContext, scope task)  @trusted => tm(tmContext, count, taskContext, task)
+            null,
+            (count, scope LeastSquaresTask task) @trusted => tm(tmContext, count, task, taskFunction)
         );
     return optimizeLeastSquaresLM!T(
         lm,
@@ -1011,47 +955,6 @@ LMStatus optimizeLMImplGenericBetterC(T)
     );
 }
 
-extern(C) void defaultLMThreadManagerDelegate(T)(void* context, size_t totalThreads, size_t treadId, size_t j) @trusted pure nothrow @nogc
-{with(*cast(LeastSquaresLM!T*)((cast(void**)context)[0])){
-    import mir.blas;
-    import mir.math.common;
-    auto f = *cast(LeastSquaresLM!T.FunctionDelegate*)((cast(void**)context)[1]);
-    auto idx = totalThreads >= n ? j : treadId;
-    auto p = JJ[idx];
-    if(iwork[idx]++ == 0)
-    {
-        copy(x, p);
-    }
-
-    auto save = p[j];
-    auto xmh = save - jacobianEpsilon;
-    auto xph = save + jacobianEpsilon;
-    if (_lower_ptr)
-        xmh = fmax(xmh, lower[j]);
-    if (_upper_ptr)
-        xph = fmin(xph, upper[j]);
-    auto Jj = J[0 .. $, j];
-    if (auto twh = xph - xmh)
-    {
-        p[j] = xph;
-        f(p, mBuffer);
-        copy(mBuffer, Jj);
-
-        p[j] = xmh;
-        f(p, mBuffer);
-
-        p[j] = save;
-
-        axpy(-1, mBuffer, Jj);
-        scal(1 / twh, Jj);
-    }
-    else
-    {
-        import mir.ndslice.topology: flattened;
-        fill(T(0), Jj);
-    }
-}}
-
 private auto assumePure(T)(T t)
 if (isFunctionPointer!T || isDelegate!T)
 {
@@ -1059,37 +962,59 @@ if (isFunctionPointer!T || isDelegate!T)
     return cast(SetFunctionAttributes!(T, functionLinkage!T, attrs)) t;
 }
 
-// version = mir_optim_debug;
-
 // LM algorithm
 LMStatus optimizeLMImplGeneric(T)
     (
         scope ref LeastSquaresLM!T lm,
-        scope LeastSquaresLM!T.FunctionDelegate f,
-        scope LeastSquaresLM!T.JacobianDelegate g = null,
-        scope LeastSquaresThreadManagerDelegate tm = null,
-    ) @trusted nothrow @nogc
+        scope LeastSquaresLM!T.Function f,
+        scope LeastSquaresLM!T.Jacobian g,
+        scope LeastSquaresThreadManager tm,
+    ) @trusted nothrow @nogc pure
 {with(lm){
+    pragma(inline, false);
+    import mir.algorithm.iteration: all;
     import mir.blas;
     import mir.lapack;
     import mir.math.common;
     import mir.math.sum: sum;
-    import mir.algorithm.iteration: all;
+    import mir.ndslice.allocation: stdcUninitSlice;
     import mir.ndslice.dynamic: transposed;
-    import mir.ndslice.topology: canonical, diagonal;
-    import mir.utility: max;
     import mir.ndslice.slice: sliced;
+    import mir.ndslice.topology: canonical, diagonal;
     import mir.optim.boxcqp;
+    import mir.utility: max;
+    import mir.algorithm.iteration;
+    import core.stdc.stdio;
+
+    auto iwork = assumePure(&stdcUninitSlice!(lapackint, 1))([n]);
+    auto bwork = assumePure(&stdcUninitSlice!(byte, 1))([n]);
+    auto deltaX = assumePure(&stdcUninitSlice!(T, 1))([n]);
+    auto Jy = assumePure(&stdcUninitSlice!(T, 1))([n]);
+    auto deltaXBase = assumePure(&stdcUninitSlice!(T, 1))([n]);
+    auto y = assumePure(&stdcUninitSlice!(T, 1))([m]);
+    auto mBuffer = assumePure(&stdcUninitSlice!(T, 1))([m]);
+    auto nBuffer = assumePure(&stdcUninitSlice!(T, 1))([n]);
+    auto JJ = assumePure(&stdcUninitSlice!(T, 2))([n, n]);
+    auto J = assumePure(&stdcUninitSlice!(T, 2))([m, n]);
+    auto work = assumePure(&stdcUninitSlice!(T, 1))([boxQPWorkLength(n) + n * 2]);
+
+    scope (exit)
+    {
+        import mir.internal.memory;
+        iwork.ptr.free;
+        bwork.ptr.free;
+        deltaX.ptr.free;
+        Jy.ptr.free;
+        deltaXBase.ptr.free;
+        y.ptr.free;
+        mBuffer.ptr.free;
+        nBuffer.ptr.free;
+        JJ.ptr.free;
+        J.ptr.free;
+        work.ptr.free;
+    }
 
     version(LDC) pragma(inline, true);
-
-    version(mir_optim_debug)
-    {
-        import core.stdc.stdio;
-        auto file = assumePure(&fopen)("x.txt", "w");
-        scope(exit)
-            assumePure(&fclose)(file);
-    }
 
     if (m == 0 || n == 0 || !x.all!"-a.infinity < a && a < a.infinity")
         return lm.status = LMStatus.badGuess; 
@@ -1109,10 +1034,10 @@ LMStatus optimizeLMImplGeneric(T)
     maxAge = maxAge ? maxAge : g ? 3 : 2 * cast(uint)n;
     uint age = maxAge;
 
-    tm = tm ? tm : delegate(size_t count, void* taskContext, scope LeastSquaresTask task) pure @nogc nothrow @trusted
+    if (!tm) tm = delegate(uint count, scope LeastSquaresTask task) pure @nogc nothrow @trusted
     {
         foreach(i; 0 .. count)
-            task(taskContext, 1, 0, i);
+            task(1, 0, i);
     };
 
     bool needJacobian = true;
@@ -1127,7 +1052,7 @@ LMStatus optimizeLMImplGeneric(T)
     import mir.algorithm.iteration: count;
     import core.stdc.stdio;
     // cast(void) assumePure(&printf)("#### ITERATE ---------\n\n\n");
-
+    lambda = 0;
     do
     {
         if (!allLessOrEqual(x, x))
@@ -1148,20 +1073,52 @@ LMStatus optimizeLMImplGeneric(T)
             }
             else
             {
+                age = 0;
                 if (g)
                 {
-                    age = 0;
                     g(x, J);
                     gCalls += 1;
                 }
                 else
                 {
-                    age = 0;
-                    fill(0, iwork);
-                    void*[2] context;
-                    context[0] = &lm;
-                    context[1] = &f;
-                    tm(n, context.ptr, &defaultLMThreadManagerDelegate!T);
+                    iwork[] = 0;
+                    tm(cast(uint)n, (uint totalThreads, uint threadId, uint j)
+                        @trusted pure nothrow @nogc
+                        {
+                            import mir.blas;
+                            import mir.math.common;
+                            auto idx = totalThreads >= n ? j : threadId;
+                            auto p = JJ[idx];
+                            if (iwork[idx]++ == 0)
+                                copy(x, p);
+
+                            auto save = p[j];
+                            auto xmh = save - jacobianEpsilon;
+                            auto xph = save + jacobianEpsilon;
+                            if (_lower_ptr)
+                                xmh = fmax(xmh, lower[j]);
+                            if (_upper_ptr)
+                                xph = fmin(xph, upper[j]);
+                            auto Jj = J[0 .. $, j];
+                            if (auto twh = xph - xmh)
+                            {
+                                p[j] = xph;
+                                f(p, mBuffer);
+                                copy(mBuffer, Jj);
+
+                                p[j] = xmh;
+                                f(p, mBuffer);
+
+                                p[j] = save;
+
+                                axpy(-1, mBuffer, Jj);
+                                scal(1 / twh, Jj);
+                            }
+                            else
+                            {
+                                fill(T(0), Jj);
+                            }
+                        });
                     fCalls += iwork.sum;
                 }
             }
@@ -1169,86 +1126,27 @@ LMStatus optimizeLMImplGeneric(T)
             Jy_nrm2 = Jy.nrm2;
         }
 
-        syrk(Uplo.Upper, 1, J.transposed, 0, JJ);
-        if (syev('V', 'L', JJ.canonical, nBuffer, _work))
-            return lm.status = LMStatus.numericError;
+        syrk(Uplo.Lower, 1, J.transposed, 0, JJ);
 
         if (!(lambda >= minLambda))
         {
-            lambda = 0.0001 * nBuffer.back;
+            lambda = 0.001 * JJ.diagonal[JJ.diagonal.iamax];
             if (!(lambda >= minLambda))
                 lambda = 1;
         }
-
-        T sigma = 0;
-
-        if (nBuffer[0] < 0)
-            sigma = nBuffer[0] * -(1 + T.epsilon * 16);
-        if (nBuffer[0] + sigma < T.epsilon * 16)
-            sigma += T.epsilon * 16;
-        if (true) 
+        JJ.diagonal[] += lambda;
+        auto l = work[0 .. n];
+        auto u = work[n .. n * 2];
+        l[] = lower - x;
+        u[] = upper - x;
+        BoxQPSettings!T settings;
+        settings.absTolerance = T.epsilon * 16;
+        settings.relTolerance = T.epsilon * 16;
+        if (settings.solveBoxQP(JJ.canonical, Jy, l, u, deltaX, false, work[2 * n .. $], iwork, bwork, false) != BoxQPStatus.solved)
         {
-            if (!(Jy_nrm2 / ((nBuffer[0] + sigma) * (1 + lambda)) < 0.5f * T.max))
-                sigma = Jy_nrm2 / ((0.5f * T.max * (1 + lambda))) - nBuffer[0];
-
-            nBuffer[] = ((nBuffer + sigma) * (1 + lambda));
+            return lm.status = LMStatus.numericError;
         }
-        else
-        {
-            if (!(Jy_nrm2 / ((nBuffer[0] + (sigma + lambda))) < 0.5f * T.max))
-                sigma = Jy_nrm2 / ((0.5f * T.max + (sigma + lambda))) - nBuffer[0];
-
-            nBuffer[] = ((nBuffer + (sigma + lambda)));
-        }
-        gemv(-1, JJ, Jy, 0, deltaX);
-        _work[0 .. n] = deltaX * (1 / nBuffer);
-        gemv(1, JJ.transposed, _work[0 .. n], 0, deltaX);
-        _work[0 .. n] = deltaX;
         axpy(1, x, deltaX);
-
-        version(mir_optim_debug)
-        {
-            assumePure(&fprintf)(file, "nonbounded_predicted_x = ");
-            foreach (ref e; deltaX)
-            {
-                assumePure(&fprintf)(file, "%e ", e);
-            }
-            assumePure(&fprintf)(file, "\n");
-        }
-
-        bool needsQP;
-        if (_lower_ptr)
-            needsQP = applyLowerBound(deltaX, lower) || needsQP;
-        if (_upper_ptr)
-            needsQP = applyUpperBound(deltaX, upper) || needsQP;
-        if (needsQP)
-        {
-            import mir.rc.array;
-            import mir.algorithm.iteration;
-            deltaX[] = _work[0 .. n];
-            {
-                auto TT = _work[0 .. n^^2].sliced(n, n);
-                TT[] = JJ;
-                foreach (i; 0 .. n)
-                    scal(nBuffer[i].sqrt, TT[i]);
-                syrk(Uplo.Lower, 1, TT.transposed, 0, JJ);
-                JJ.eachUploPair!("a = b", false);
-            }
-
-            auto l = _work[0 .. n];
-            auto u = _work[n .. n * 2];
-            l[] = lower - x;
-            u[] = upper - x;
-            BoxQPSettings!T settings;
-            settings.absTolerance = T.epsilon * 16;
-            settings.relTolerance = T.epsilon * 16;
-            if (settings.solveBoxQP(JJ.canonical, Jy, l, u, deltaX, true, _work[2 * n .. $], iwork, bwork) != BoxQPStatus.solved)
-            {
-                return lm.status = LMStatus.numericError;
-            }
-            axpy(1, x, deltaX);
-        }
-
         axpy(-1, x, deltaX);
         copy(y, mBuffer);
         gemv(1, J, deltaX, 1, mBuffer); // (J * dx + y) * (J * dx + y)^T
@@ -1256,8 +1154,10 @@ LMStatus optimizeLMImplGeneric(T)
 
         if (!(predictedResidual <= residual))
         {
+            predictedResidual = residual;
             if (age == 0)
             {
+                cast(void) assumePure(&printf)("#### predictedResidual = %e residual = %e diff = %e\n", predictedResidual, residual, predictedResidual - residual);
                 break;
             }
             else
@@ -1274,10 +1174,8 @@ LMStatus optimizeLMImplGeneric(T)
         copy(x, nBuffer);
         axpy(1, deltaX, nBuffer);
 
-        if (_lower_ptr)
-            applyLowerBound(nBuffer, lower);
-        if (_upper_ptr)
-            applyUpperBound(nBuffer, upper);
+        applyLowerBound(nBuffer, lower);
+        applyUpperBound(nBuffer, upper);
 
         f(nBuffer, mBuffer);
 
@@ -1290,36 +1188,7 @@ LMStatus optimizeLMImplGeneric(T)
         auto predictedImprovement = residual - predictedResidual;
         auto rho = improvement / predictedImprovement;
 
-        version(mir_optim_debug)
-        {
-            assumePure(&fprintf)(file, "x = ");
-            foreach (ref e; x)
-            {
-                assumePure(&fprintf)(file, "%e ", e);
-            }
-            assumePure(&fprintf)(file, "\n");
-            assumePure(&fprintf)(file, "proposed_x = ");
-            foreach (ref e; nBuffer)
-            {
-                assumePure(&fprintf)(file, "%e ", e);
-            }
-            assumePure(&fprintf)(file, "\n");
-            assumePure(&fprintf)(file, "lambda = %e\n", lambda);
-            assumePure(&fprintf)(file, "sigma = %e\n", sigma);
-            // assumePure(&fprintf)(file, "mu = %e\n", mu);
-            assumePure(&fprintf)(file, "nu = %e\n", nu);
-            assumePure(&fprintf)(file, "improvement = %e\n", improvement);
-            assumePure(&fprintf)(file, "predictedImprovement = %e\n", predictedImprovement);
-            assumePure(&fprintf)(file, "rho = %e\n", rho);
-            assumePure(&fprintf)(file, "trialResidual = %e\n", trialResidual);
-            assumePure(&fprintf)(file, "predictedResidual = %e\n", predictedResidual);
-            assumePure(&fprintf)(file, "residual = %e\n", residual);
-            assumePure(&fprintf)(file, "=====================\n");
-            assumePure(&fflush)(file);
-        }
 
-        import mir.algorithm.iteration: count;
-        import core.stdc.stdio;
         // cast(void) assumePure(&printf)("#### LAMBDA = %e\n", lambda);
 
         if (improvement > 0)
@@ -1397,14 +1266,6 @@ LMStatus optimizeLMImplGeneric(T)
         }
     }
     while (iterCt < maxIter);
-
-    version(mir_optim_debug)
-    {
-        assumePure(&fprintf)(file, "iterCt < maxIter = %d\n", iterCt < maxIter);
-        assumePure(&fprintf)(file, "fConverged = %d\n", fConverged);
-        assumePure(&fprintf)(file, "gConverged = %d\n", gConverged);
-        assumePure(&fprintf)(file, "xConverged = %d\n", xConverged);
-    }
 
     return lm.status = LMStatus.success;
 }}

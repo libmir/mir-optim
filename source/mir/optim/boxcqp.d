@@ -71,7 +71,7 @@ Params:
 +/
 @safe pure nothrow @nogc
 BoxQPStatus solveBoxQP(T)(
-    Slice!(const(T)*, 2, Canonical) P,
+    Slice!(T*, 2, Canonical) P,
     Slice!(const(T)*) q,
     Slice!(const(T)*) l,
     Slice!(const(T)*) u,
@@ -96,20 +96,21 @@ Solves:
     `argmin_x(xPx + qx) : l <= x <= u`
 Params:
     settings = Iteration settings
-    P = Positive-definite Matrix, NxN
+    P = Positive-definite Matrix (in lower triangular part is store), NxN. The upper triangular part of the matrix is used for temporary data and then can be resotored.
     q = Linear component, N
     l = Lower bounds in [-inf, +inf), N
     u = Upper bounds in (-inf, +inf], N
     x = solutoin, N
+    unconstrainedSolution = 
     work = workspace, boxQPWorkLength(N)
     iwork = integer workspace, N
     bwork = byte workspace, N
-    xContainsUnconstraintSolution = 
+    restoreUpperP = (optional) restore upper triangular part of P
 +/
 @safe pure nothrow @nogc
 BoxQPStatus solveBoxQP(T)(
     ref const BoxQPSettings!T settings,
-    Slice!(const(T)*, 2, Canonical) P,
+    Slice!(T*, 2, Canonical) P,
     Slice!(const(T)*) q,
     Slice!(const(T)*) l,
     Slice!(const(T)*) u,
@@ -118,6 +119,7 @@ BoxQPStatus solveBoxQP(T)(
     Slice!(T*) work,
     Slice!(lapackint*) iwork,
     Slice!(byte*) bwork,
+    bool restoreUpperP = true,
 )
     if (is(T == float) || is(T == double))
 in {
@@ -133,7 +135,8 @@ in {
     assert(work.length >= boxQPWorkLength(n));
 }
 do {
-    import mir.blas: dot;
+    import mir.math.sum;
+    import mir.blas: dot, copy;
     import mir.lapack: posvx;
     import mir.ndslice.mutation: copyMinor;
     import mir.ndslice.slice: sliced;
@@ -230,6 +233,9 @@ Start:
                 }
             }
 
+            if (s == n)
+                break;
+
             {
                 auto SIWorkspace = iwork.lightScope[0 .. s];
                 auto buffer = work;
@@ -237,30 +243,43 @@ Start:
                 auto sX = buffer[0 .. s]; buffer = buffer[s .. $];
                 auto b = buffer[0 .. s]; buffer = buffer[s .. $];
                 auto lapackWorkSpace = buffer[0 .. s * 3]; buffer = buffer[s * 3 .. $];
-                auto A = buffer[0 .. s ^^ 2].sliced(s, s); buffer = buffer[s ^^ 2 .. $];
+                // auto A = buffer[0 .. s ^^ 2].sliced(s, s); buffer = buffer[s ^^ 2 .. $];
                 auto F = buffer[0 .. s ^^ 2].sliced(s, s); buffer = buffer[s ^^ 2 .. $];
 
-                copyMinor(P, A, SIWorkspace, SIWorkspace);
+                auto A = P[0 .. $ - 1, 1 .. $][$ - s .. $, $ - s .. $];
+                // auto A = P[0 .. s, $ - s .. $];
+
+                // copyMinor(P, A, SIWorkspace, SIWorkspace);
 
                 foreach (ii, i; SIWorkspace.field)
                 {
-                    auto Pi = P[i];
-                    T sum = q[i];
-                    foreach (j; 0 .. n)
+                    Summator!(T, Summation.kbn) sum = q[i];
+                    uint jj;
                     {
-                        if (flags[j] == Flag.l)
-                            sum += Pi[j] * l[j];
-                        else
-                        if (flags[j] == Flag.u)
-                            sum += Pi[j] * u[j];
+                        auto Aii = A[0 .. $, ii];
+                        auto Pi = P[i, 0 .. $];
+                        foreach (j; 0 .. i)
+                            if (flags[j])
+                                sum += Pi[j] * (flags[j] < 0 ? l : u)[j];
+                            else
+                                Aii[jj++] = Pi[j];
                     }
-                    b[ii] = -sum;
+                    {
+                        auto Aii = A[ii, 0 .. $];
+                        auto Pi = P[0 .. $, i];
+                        foreach (j; i .. n)
+                            if (flags[j])
+                                sum += Pi[j] * (flags[j] < 0 ? l : u)[j];
+                            else
+                                Aii[jj++] = Pi[j];
+                    }
+                    b[ii] = -sum.sum;
                 }
 
                 {
                     char equed;
                     T rcond, ferr, berr;
-                    auto info = posvx('E', 'U',
+                    auto info = posvx('E', 'L',
                         A.canonical,
                         F.canonical,
                         equed,
@@ -283,11 +302,11 @@ Start:
             }
         }
 
-        foreach (i; 0 .. n) if (flags[i] == Flag.l)
-            la[i] = dot!T(P[i], x) + q[i];
-
-        foreach (i; 0 .. n) if (flags[i] == Flag.u)
-            mu[i] = -(dot!T(P[i], x) + q[i]);
+        foreach (i; 0 .. n) if (flags[i])
+        {
+            auto val = dot!T(P[i, 0 .. i], x[0 .. i]) + dot!T(P[i .. $, i], x[i .. $]) + q[i];
+            (flags[i] < 0 ? la : mu)[i] = flags[i] < 0 ? val : -val;
+        }
 
         foreach (i; 0 .. n)
         {
@@ -314,6 +333,16 @@ Start:
 
             import core.stdc.stdio;
             (()@trusted => cast(void) assumePure(&printf)("#### BOXCQP iters = %d\n", step + 1))();
+        }
+
+        if (restoreUpperP)
+        {
+            while(P.length > 1)
+            {
+                copy(P[1 .. $, 0], P[0, 1 .. $]);
+                P.popFront!1;
+                P.popFront!0;
+            }
         }
 
         return BoxQPStatus.solved;
