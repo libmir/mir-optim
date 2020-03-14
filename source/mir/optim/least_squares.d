@@ -1032,7 +1032,6 @@ LMStatus optimizeLMImplGeneric(T)
         return lm.status = LMStatus.badLambdaParams;
 
     maxAge = maxAge ? maxAge : g ? 3 : 2 * cast(uint)n;
-    uint age = maxAge;
 
     if (!tm) tm = delegate(uint count, scope LeastSquaresTask task) pure @nogc nothrow @trusted
     {
@@ -1040,11 +1039,13 @@ LMStatus optimizeLMImplGeneric(T)
             task(1, 0, i);
     };
 
-    bool needJacobian = true;
     f(x, y);
     ++fCalls;
-    residual = dot(y, y);
+    residual = y.nrm2;
 
+
+    bool needJacobian = true;
+    uint age = maxAge;
     T mu = 1;
 
     int badPredictions;
@@ -1057,15 +1058,15 @@ LMStatus optimizeLMImplGeneric(T)
     {
         if (!allLessOrEqual(x, x))
             return lm.status = LMStatus.numericError;
-        T Jy_nrm2 = void;
-        T deltaXBase_dot = void;
+        // T Jy_nrm2 = void;
+        T deltaXBase_nrm2 = void;
         if (needJacobian)
         {
             needJacobian = false;
             if (age < maxAge)
             {
                 age++;
-                auto d = 1 / deltaXBase_dot;
+                auto d = 1 / deltaXBase_nrm2 ^^ 2;
                 axpy(-1, y, mBuffer); // -deltaY
                 gemv(1, J, deltaXBase, 1, mBuffer); //-(f_new - f_old - J_old*h)
                 scal(-d, mBuffer);
@@ -1123,7 +1124,7 @@ LMStatus optimizeLMImplGeneric(T)
                 }
             }
             gemv(1, J.transposed, y, 0, Jy);
-            Jy_nrm2 = Jy.nrm2;
+            // Jy_nrm2 = Jy.nrm2;
         }
 
         syrk(Uplo.Lower, 1, J.transposed, 0, JJ);
@@ -1150,81 +1151,72 @@ LMStatus optimizeLMImplGeneric(T)
         axpy(-1, x, deltaX);
         copy(y, mBuffer);
         gemv(1, J, deltaX, 1, mBuffer); // (J * dx + y) * (J * dx + y)^T
-        auto predictedResidual = dot(mBuffer, mBuffer);
+        auto predictedResidual = mBuffer.nrm2;
 
         if (!(predictedResidual <= residual))
         {
             predictedResidual = residual;
-            if (age == 0)
+            if (age == 0 && mu == 1)
             {
                 cast(void) assumePure(&printf)("#### predictedResidual = %e residual = %e diff = %e\n", predictedResidual, residual, predictedResidual - residual);
                 break;
             }
+            lambda = fmax(lambdaDecrease * lambda, minLambda);
+            mu = 1;
+            gConverged = false;
+            xConverged = false;
+            if (++badPredictions < 8)
+                continue;
             else
-            {
-                needJacobian = true;
-                age = maxAge;
-                if (++badPredictions < 8)
-                    continue;
-                else
-                    break;
-            }
+                break;
         }
 
         copy(x, nBuffer);
         axpy(1, deltaX, nBuffer);
 
-        applyLowerBound(nBuffer, lower);
-        applyUpperBound(nBuffer, upper);
+        applyBounds(nBuffer, lower, upper);
 
         f(nBuffer, mBuffer);
 
         ++fCalls;
         ++iterCt;
-        auto trialResidual = dot(mBuffer, mBuffer);
-        if (trialResidual != trialResidual || trialResidual == T.infinity)
+        auto trialResidual = mBuffer.nrm2;
+        if (!(trialResidual <= T.max.sqrt * (1 - T.epsilon)))
             return lm.status = LMStatus.numericError;
-        auto improvement = residual - trialResidual;
-        auto predictedImprovement = residual - predictedResidual;
+        auto improvement = residual ^^ 2 - trialResidual ^^ 2;
+        auto predictedImprovement = residual ^^ 2 - predictedResidual ^^ 2;
         auto rho = improvement / predictedImprovement;
-
 
         // cast(void) assumePure(&printf)("#### LAMBDA = %e\n", lambda);
 
-        if (improvement > 0)
+        enum maxMu = 16;
+        if (rho > minStepQuality && improvement > 0)
         {
             copy(deltaX, deltaXBase);
-            deltaXBase_dot = dot(deltaXBase, deltaXBase);
-            if (deltaXBase_dot != deltaXBase_dot || deltaXBase_dot == T.infinity)
+            deltaXBase_nrm2 = deltaXBase.nrm2;
+            if (!(deltaXBase_nrm2 <= T.max.sqrt * (1 - T.epsilon)))
                 return lm.status = LMStatus.numericError;
             copy(nBuffer, x);
             swap(y, mBuffer);
             residual = trialResidual;
             needJacobian = true;
-        }
-        enum maxMu = 1;
-        if (rho > minStepQuality && improvement > 0)
-        {
+
             gemv(1, J.transposed, y, 0, nBuffer);
-            gConverged = !(nBuffer.amax > tolG);
-            xConverged = !(deltaXBase_dot.sqrt > tolX);// fmax(tolX, tolX * x.nrm2));
+            gConverged = !(nBuffer[nBuffer.iamax].fabs > tolG);
+            xConverged = !(deltaXBase_nrm2 > tolX);// fmax(tolX, tolX * x.nrm2));
 
             if (gConverged && age == 0)
                 break;
             if (xConverged)
             {
-                if (age) //|| rho > goodStepQuality && mu == maxMu
-                {
-                    lambda = fmax(lambdaDecrease * lambda, minLambda);
-                    mu = 1;
-                    gConverged = false;
-                    xConverged = false;
-                    age = maxAge;
-                }
-                else
-                {
+                if (age == 0) //|| rho > goodStepQuality && mu == maxMu
                     break;
-                }
+                lambda = fmax(lambdaDecrease * lambda, minLambda);
+                mu = 1;
+                gConverged = false;
+                xConverged = false;
+                age = maxAge;
+                continue;
             }
 
             if (fConverged)
@@ -1249,16 +1241,13 @@ LMStatus optimizeLMImplGeneric(T)
             }
             if (newlambda > maxLambda)
             {
-                if (age == 0)
-                {
-                    break;
-                }
-                else
+                if (age)
                 {
                     needJacobian = true;
                     age = maxAge;
                     continue;
                 }
+                break;
             }
             if (mu < maxMu)
                 mu *= 2;
@@ -1269,46 +1258,6 @@ LMStatus optimizeLMImplGeneric(T)
 
     return lm.status = LMStatus.success;
 }}
-
-pragma(inline, false)
-bool applyLowerBound(T)(Slice!(T*) x, Slice!(const(T)*) bound)
-{
-    bool ret;
-    foreach (i; 0 .. x.length)
-    {
-        if (x[i] < bound[i])
-        {
-            x[i] = bound[i];
-            ret = true;
-        }
-    }
-    return ret;
-}
-
-pragma(inline, false)
-bool applyUpperBound(T)(Slice!(T*) x, Slice!(const(T)*) bound)
-{
-    bool ret;
-    foreach (i; 0 .. x.length)
-    {
-        if (x[i] > bound[i])
-        {
-            x[i] = bound[i];
-            ret = true;
-        }
-    }
-    return ret;
-}
-
-pragma(inline, false)
-T amax(T, SliceKind kind)(Slice!(const(T)*, 1, kind) x)
-{
-    import mir.math.common: fmax, fabs;
-    T ret = 0;
-    foreach(ref e; x)
-        ret = fmax(fabs(e), ret);
-    return ret;
-}
 
 pragma(inline, false)
 void fill(T, SliceKind kind)(T value, Slice!(T*, 1, kind) x)

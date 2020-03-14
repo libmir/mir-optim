@@ -318,8 +318,7 @@ Start:
             }
         }
 
-        foreach (i; 0 .. n)
-            x[i] = x[i].fmin(u[i]).fmax(l[i]);
+        applyBounds(x, l, u);
 
         version(none)
         {
@@ -370,4 +369,12 @@ unittest
 
     solveQP(P, q, l, u, x);
     assert(x == [-0.5, 2, 1]);
+}
+
+package(mir) void applyBounds(T)(Slice!(T*) x, Slice!(const(T)*) l, Slice!(const(T)*) u)
+{
+    pragma(inline, false);
+    import mir.math.common: fmin, fmax;
+    foreach (i; 0 .. x.length)
+        x[i] = x[i].fmin(u[i]).fmax(l[i]);
 }
