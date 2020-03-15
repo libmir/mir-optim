@@ -1056,7 +1056,7 @@ LMStatus optimizeLMImplGeneric(T)
     lambda = 0;
     iterCt = 0;
     T deltaXBase_nrm2;
-    int muFactor = 2;
+        int muFactor = 2;
     do
     {
         if (!allLessOrEqual(x, x))
@@ -1189,7 +1189,7 @@ LMStatus optimizeLMImplGeneric(T)
 
         // cast(void) assumePure(&printf)("#### LAMBDA = %e\n", lambda);
 
-        enum maxMu = 8;
+        enum maxMu = 4;
         if (rho > minStepQuality && improvement > 0)
         {
             ++iterCt;
@@ -1246,6 +1246,8 @@ LMStatus optimizeLMImplGeneric(T)
             {
                 if (age)
                 {
+                    if (iterCt == 0)
+                        assert(0);
                     needJacobian = true;
                     age = maxAge;
                     continue;
