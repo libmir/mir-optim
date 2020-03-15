@@ -89,7 +89,7 @@ struct LeastSquaresLM(T)
     /// Default epsilon for finite difference Jacobian approximation
     enum T jacobianEpsilonDefault = T(2) ^^ ((1 - T.mant_dig) / 2);
     /// Default `lambda` is multiplied by this factor after step below min quality
-    enum T lambdaIncreaseDefault = 4;
+    enum T lambdaIncreaseDefault = 2;
     /// Default `lambda` is multiplied by this factor after good quality steps
     enum T lambdaDecreaseDefault = 1 / (GoldenRatio * lambdaIncreaseDefault);
     /// Default scale such as for steps below this quality, the trust region is shrinked
@@ -1054,12 +1054,13 @@ LMStatus optimizeLMImplGeneric(T)
     import core.stdc.stdio;
     // cast(void) assumePure(&printf)("#### ITERATE ---------\n\n\n");
     lambda = 0;
+    iterCt = 0;
+    T deltaXBase_nrm2;
+    int muFactor = 2;
     do
     {
         if (!allLessOrEqual(x, x))
             return lm.status = LMStatus.numericError;
-        // T Jy_nrm2 = void;
-        T deltaXBase_nrm2 = void;
         if (needJacobian)
         {
             needJacobian = false;
@@ -1179,7 +1180,6 @@ LMStatus optimizeLMImplGeneric(T)
         f(nBuffer, mBuffer);
 
         ++fCalls;
-        ++iterCt;
         auto trialResidual = mBuffer.nrm2;
         if (!(trialResidual <= T.max.sqrt * (1 - T.epsilon)))
             return lm.status = LMStatus.numericError;
@@ -1189,9 +1189,10 @@ LMStatus optimizeLMImplGeneric(T)
 
         // cast(void) assumePure(&printf)("#### LAMBDA = %e\n", lambda);
 
-        enum maxMu = 16;
+        enum maxMu = 8;
         if (rho > minStepQuality && improvement > 0)
         {
+            ++iterCt;
             copy(deltaX, deltaXBase);
             deltaXBase_nrm2 = deltaXBase.nrm2;
             if (!(deltaXBase_nrm2 <= T.max.sqrt * (1 - T.epsilon)))
@@ -1209,9 +1210,11 @@ LMStatus optimizeLMImplGeneric(T)
                 break;
             if (xConverged)
             {
-                if (age == 0) //|| rho > goodStepQuality && mu == maxMu
+                if (age == 0) //  && rho > goodStepQuality && muFactor == 1
                     break;
-                lambda = fmax(lambdaDecrease * lambda, minLambda);
+                // cast(void) assumePure(&printf)("#### deltaXBase_nrm2 = %e\n", deltaXBase_nrm2);
+                lambda = fmax(lambdaDecrease ^^ 2 * lambda, minLambda);
+                muFactor = 1;
                 mu = 1;
                 gConverged = false;
                 xConverged = false;
@@ -1250,7 +1253,7 @@ LMStatus optimizeLMImplGeneric(T)
                 break;
             }
             if (mu < maxMu)
-                mu *= 2;
+                mu *= muFactor;
             lambda = newlambda;
         }
     }
