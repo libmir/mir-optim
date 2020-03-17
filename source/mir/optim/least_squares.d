@@ -87,7 +87,7 @@ struct LeastSquaresLM(T)
     /// Default epsilon for finite difference Jacobian approximation
     enum T jacobianEpsilonDefault = T(2) ^^ ((1 - T.mant_dig) / 2);
     /// Default `lambda` is multiplied by this factor after step below min quality
-    enum T lambdaIncreaseDefault = 4;
+    enum T lambdaIncreaseDefault = 2;
     /// Default `lambda` is multiplied by this factor after good quality steps
     enum T lambdaDecreaseDefault = 1 / (GoldenRatio * lambdaIncreaseDefault);
     /// Default scale such as for steps below this quality, the trust region is shrinked
