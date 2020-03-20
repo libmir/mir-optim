@@ -67,71 +67,49 @@ version(D_Exceptions)
     ];
 }
 
+/// Delegates for low level D API.
+alias LeastSquaresFunction(T) = void delegate(Slice!(const(T)*) x, Slice!(T*) y) @safe nothrow @nogc pure;
+/// ditto
+alias LeastSquaresJacobian(T) = void delegate(Slice!(const(T)*) x, Slice!(T*, 2) J) @safe nothrow @nogc pure;
+
+/// Delegates for low level C API.
+alias LeastSquaresFunctionBetterC(T) = extern(C) void function(scope void* context, size_t m, size_t n, const(T)* x, T* y) @system nothrow @nogc pure;
+///
+alias LeastSquaresJacobianBetterC(T) = extern(C) void function(scope void* context, size_t m, size_t n, const(T)* x, T* J) @system nothrow @nogc pure;
+
 /++
 Modified Levenberg-Marquardt parameters, data, and state.
 +/
 struct LeastSquares(T)
     if (is(T == double) || is(T == float))
 {
-
     import mir.optim.boxcqp;
     import mir.math.common: sqrt;
     import mir.math.constant: GoldenRatio;
     import lapack: lapackint;
 
-    /// Default tolerance in x
-    enum T tolXDefault = T.epsilon;;
-    /// Default tolerance in gradient
-    enum T tolGDefault = T.epsilon; //T(2) ^^ ((1 - T.mant_dig) * 3 / 4);
-    /// Default value for `maxGoodResidual`.
-    enum T maxGoodResidualDefault = T.epsilon;
-    /// Default epsilon for finite difference Jacobian approximation
-    enum T jacobianEpsilonDefault = T(2) ^^ ((1 - T.mant_dig) / 2);
-    /// Default `lambda` is multiplied by this factor after step below min quality
-    enum T lambdaIncreaseDefault = 2;
-    /// Default `lambda` is multiplied by this factor after good quality steps
-    enum T lambdaDecreaseDefault = 1 / (GoldenRatio * lambdaIncreaseDefault);
-    /// Default scale such as for steps below this quality, the trust region is shrinked
-    enum T minStepQualityDefault = 0.1;
-    /// Default scale such as for steps above thsis quality, the trust region is expanded
-    enum T goodStepQualityDefault = 0.5;
-    /// Default maximum trust region radius
-    enum T maxLambdaDefault = T.max / 16;
-    /// Default maximum trust region radius
-    enum T minLambdaDefault = T.min_normal * 16;
-
-    /// Delegates for low level D API.
-    alias Function = void delegate(Slice!(const(T)*) x, Slice!(T*) y) @safe nothrow @nogc pure;
-    /// ditto
-    alias Jacobian = void delegate(Slice!(const(T)*) x, Slice!(T*, 2) J) @safe nothrow @nogc pure;
-
-    /// Delegates for low level C API.
-    alias FunctionBetterC = extern(C) void function(scope void* context, size_t m, size_t n, const(T)* x, T* y) @system nothrow @nogc pure;
-    ///
-    alias JacobianBetterC = extern(C) void function(scope void* context, size_t m, size_t n, const(T)* x, T* J) @system nothrow @nogc pure;
-
     /// maximum number of iterations
     uint maxIter = 1000;
     /// tolerance in x
-    T tolX = tolXDefault;
+    T tolX = T.epsilon;
     /// tolerance in gradient
-    T tolG = tolGDefault;
+    T tolG = T.epsilon;
     /// the algorithm stops iteration when the residual value is less or equal to `maxGoodResidual`.
-    T maxGoodResidual = maxGoodResidualDefault;
+    T maxGoodResidual = T.epsilon ^^ 2;
     /// `lambda` is multiplied by this factor after step below min quality
-    T lambdaIncrease = lambdaIncreaseDefault;
+    T lambdaIncrease = 2;
     /// `lambda` is multiplied by this factor after good quality steps
-    T lambdaDecrease = lambdaDecreaseDefault;
+    T lambdaDecrease = 1 / (GoldenRatio * 2);
     /// for steps below this quality, the trust region is shrinked
-    T minStepQuality = minStepQualityDefault;
+    T minStepQuality = 0.1;
     /// for steps above this quality, the trust region is expanded
-    T goodStepQuality = goodStepQualityDefault;
+    T goodStepQuality = 0.5;
     /// minimum trust region radius
-    T maxLambda = maxLambdaDefault;
+    T maxLambda = T.max / 16;
     /// maximum trust region radius
-    T minLambda = minLambdaDefault;
+    T minLambda = T.min_normal * 16;
     /// epsilon for finite difference Jacobian approximation
-    T jacobianEpsilon = jacobianEpsilonDefault;
+    T jacobianEpsilon = T(2) ^^ ((1 - T.mant_dig) / 2);
 
     /++
     Counters and state values.
@@ -494,7 +472,7 @@ LMStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
         fInst(x, x);
     }
     static if (is(typeof(g) == typeof(null)))
-        enum LeastSquares!T.Jacobian gInst = null;
+        enum LeastSquaresJacobian!T gInst = null;
     else
     {
         auto gInst = delegate(Slice!(const(T)*) x, Slice!(T*, 2) J)
@@ -608,8 +586,8 @@ LMStatus optimizeLeastSquaresD
         Slice!(const(double)*) u,
         Slice!(double*) work,
         Slice!(lapackint*) iwork,
-        scope LeastSquares!double.Function f,
-        scope LeastSquares!double.Jacobian g = null,
+        scope LeastSquaresFunction!double f,
+        scope LeastSquaresJacobian!double g = null,
         scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
@@ -628,8 +606,8 @@ LMStatus optimizeLeastSquaresS
         Slice!(const(float)*) u,
         Slice!(float*) work,
         Slice!(lapackint*) iwork,
-        scope LeastSquares!float.Function f,
-        scope LeastSquares!float.Jacobian g = null,
+        scope LeastSquaresFunction!float f,
+        scope LeastSquaresJacobian!float g = null,
         scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
@@ -707,9 +685,9 @@ extern(C) @safe nothrow @nogc
             Slice!(double*) work,
             Slice!(lapackint*) iwork,
             scope void* fContext,
-            scope LeastSquares!double.FunctionBetterC f,
+            scope LeastSquaresFunctionBetterC!double f,
             scope void* gContext = null,
-            scope LeastSquares!double.JacobianBetterC g = null,
+            scope LeastSquaresJacobianBetterC!double g = null,
             scope void* tmContext = null,
             scope LeastSquaresThreadManagerBetterC tm = null,
         ) @system nothrow @nogc pure
@@ -731,9 +709,9 @@ extern(C) @safe nothrow @nogc
             Slice!(float*) work,
             Slice!(lapackint*) iwork,
             scope void* fContext,
-            scope LeastSquares!float.FunctionBetterC f,
+            scope LeastSquaresFunctionBetterC!float f,
             scope void* gContext = null,
-            scope LeastSquares!float.JacobianBetterC g = null,
+            scope LeastSquaresJacobianBetterC!float g = null,
             scope void* tmContext = null,
             scope LeastSquaresThreadManagerBetterC tm = null,
         ) @system nothrow @nogc pure
@@ -805,9 +783,9 @@ LMStatus optimizeLeastSquaresImplGenericBetterC(T)
         Slice!(T*) work,
         Slice!(lapackint*) iwork,
         scope void* fContext,
-        scope LeastSquares!T.FunctionBetterC f,
+        scope LeastSquaresFunctionBetterC!T f,
         scope void* gContext,
-        scope LeastSquares!T.JacobianBetterC g,
+        scope LeastSquaresJacobianBetterC!T g,
         scope void* tmContext,
         scope LeastSquaresThreadManagerBetterC tm,
     ) @system nothrow @nogc pure
@@ -877,8 +855,8 @@ LMStatus optimizeLeastSquaresImplGeneric(T)
         Slice!(const(T)*) upper,
         Slice!(T*) work,
         Slice!(lapackint*) iwork,
-        scope LeastSquares!T.Function f,
-        scope LeastSquares!T.Jacobian g,
+        scope LeastSquaresFunction!T f,
+        scope LeastSquaresJacobian!T g,
         scope LeastSquaresThreadManager tm,
     ) @trusted nothrow @nogc pure
 {with(lm){
