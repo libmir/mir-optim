@@ -58,11 +58,11 @@ struct BoxQPSettings(T)
     /++
     Relative active constraints tolerance.
     +/
-    T relTolerance = T.epsilon.sqrt;
+    T relTolerance = T.epsilon * 16;
     /++
     Absolute active constraints tolerance.
     +/
-    T absTolerance = T.epsilon.sqrt;
+    T absTolerance = T.epsilon * 16;
     /++
     Maximal iterations allowed. `0` is used for default value equals to `10 * N + 100`.
     +/

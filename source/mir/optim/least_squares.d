@@ -78,9 +78,9 @@ alias LeastSquaresFunctionBetterC(T) = extern(C) void function(scope void* conte
 alias LeastSquaresJacobianBetterC(T) = extern(C) void function(scope void* context, size_t m, size_t n, const(T)* x, T* J) @system nothrow @nogc pure;
 
 /++
-Modified Levenberg-Marquardt parameters, data, and state.
+Least-Squares iteration settings.
 +/
-struct LeastSquares(T)
+struct LeastSquaresSettings(T)
     if (is(T == double) || is(T == float))
 {
     import mir.optim.boxcqp;
@@ -90,6 +90,8 @@ struct LeastSquares(T)
 
     /// maximum number of iterations
     uint maxIter = 1000;
+    /// Maximum jacobian model age
+    uint maxAge;
     /// tolerance in x
     T tolX = T.epsilon;
     /// tolerance in gradient
@@ -110,21 +112,28 @@ struct LeastSquares(T)
     T minLambda = T.min_normal * 16;
     /// epsilon for finite difference Jacobian approximation
     T jacobianEpsilon = T(2) ^^ ((1 - T.mant_dig) / 2);
+    /// Bound constrained convex quadratic problem settings
+    BoxQPSettings!T qpSettings;
+}
 
+/++
+Least-Squares results.
++/
+struct LeastSquaresResult(T)
+    if (is(T == double) || is(T == float))
+{
     /++
     Counters and state values.
     +/
-    size_t iterCt;
+    uint iterCt;
     /// ditto
-    size_t fCalls;
+    uint fCalls;
     /// ditto
-    size_t gCalls;
+    uint gCalls;
     /// ditto
     T residual = T.infinity;
     /// (inverse of) initial trust region radius
     T lambda = 0;
-    /// ditto
-    uint maxAge;
     /// ditto
     LeastSquaresStatus status = LeastSquaresStatus.initialized;
     /// ditto
@@ -134,29 +143,12 @@ struct LeastSquares(T)
     /// ditto
     /// `residual <= maxGoodResidual`
     bool fConverged;
-
-    /++
-    Resets all counters and flags, fills `x`, `y`, `upper`, `lower`, vecors with default values.
-    +/
-    pragma(inline, false)
-    void reset()() @safe pure nothrow @nogc
-    {
-        lambda = 0;
-        iterCt = 0;
-        fCalls = 0;
-        gCalls = 0;     
-        residual = T.infinity;
-        maxAge = 0;
-        status = LeastSquaresStatus.initialized;
-        xConverged = false;
-        gConverged = false;    
-    }
 }
 
 /++
 High level D API for Levenberg-Marquardt Algorithm.
 
-Computes the argmin over x of `sum_i(f(x_i)^2)` using the Modified Levenberg-Marquardt
+Computes the argmin over x of `sum_i(f(x_i)^2)` using the Levenberg-Marquardt
 algorithm, and an estimate of the Jacobian of `f` at x.
 
 The function `f` should take an input vector of length `n`, and fill an output
@@ -169,12 +161,12 @@ Params:
     f = `n -> m` function
     g = `m × n` Jacobian (optional)
     tm = thread manager for finite difference jacobian approximation in case of g is null (optional)
-    lm = Levenberg-Marquardt data structure
+    settings = Levenberg-Marquardt data structure
     taskPool = task Pool with `.parallel` method for finite difference jacobian approximation in case of g is null (optional)
 See_also: $(LREF optimizeImpl)
 +/
 void optimize(alias f, alias g = null, alias tm = null, T)(
-    scope ref LeastSquares!T lm,
+    scope ref LeastSquaresSettings!T settings,
     size_t m,
     Slice!(T*) x,
     Slice!(const(T)*) l,
@@ -182,13 +174,13 @@ void optimize(alias f, alias g = null, alias tm = null, T)(
 )
     if ((is(T == float) || is(T == double)))
 {
-    if (auto err = optimizeImpl!(f, g, tm, T)(lm, m, x, l, u))
+    if (auto err = optimizeImpl!(f, g, tm, T)(settings, m, x, l, u).status)
         throw leastSquaresExceptions[err == 1 ? 0 : err + 33];
 }
 
 /// ditto
 void optimize(alias f, TaskPool, T)(
-    scope ref LeastSquares!T lm,
+    scope ref LeastSquaresSettings!T settings,
     size_t m,
     Slice!(T*) x,
     Slice!(const(T)*) l,
@@ -210,7 +202,7 @@ void optimize(alias f, TaskPool, T)(
                 task(1, 0, i);
         }
     };
-    if (auto err = optimizeImpl!(f, null, tm, T)(lm, m, x, l, u))
+    if (auto err = optimizeImpl!(f, null, tm, T)(settings, m, x, l, u).status)
         throw leastSquaresExceptions[err == 1 ? 0 : err + 33];
 }
 
@@ -222,7 +214,7 @@ version(mir_optim_test)
     import mir.ndslice.slice: sliced;
     import mir.blas: nrm2;
 
-    LeastSquares!double lm;
+    LeastSquaresSettings!double settings;
     auto x = [100.0, 100].sliced;
     auto l = x.shape.slice(-double.infinity);
     auto u = x.shape.slice(+double.infinity);
@@ -239,7 +231,7 @@ version(mir_optim_test)
             J[1, 0] = 0;
             J[1, 1] = -1;
         },
-    )(lm, 2, x, l, u);
+    )(settings, 2, x, l, u);
 
     assert(nrm2((x - [0, 2].sliced).slice) < 1e-8);
 }
@@ -253,11 +245,11 @@ unittest
     import mir.blas: nrm2;
     import std.parallelism: taskPool;
 
-    LeastSquares!double lm;
+    LeastSquaresSettings!double settings;
     auto x = [-1.2, 1].sliced;
     auto l = x.shape.slice(-double.infinity);
     auto u = x.shape.slice(+double.infinity);
-    lm.optimize!(
+    settings.optimize!(
         (x, y) // Rosenbrock function
         {
             y[0] = 10 * (x[1] - x[0]^^2);
@@ -266,7 +258,7 @@ unittest
     )(2, x, l, u, taskPool);
 
     // import std.stdio;
-    // writeln(lm);
+    // writeln(settings);
     // writeln(x);
 
     assert(nrm2((x - [1, 1].sliced).slice) < 1e-6);
@@ -281,7 +273,7 @@ version(mir_optim_test)
     import mir.ndslice.slice: sliced;
     import mir.blas: nrm2;
 
-    LeastSquares!double lm;
+    LeastSquaresSettings!double settings;
     auto x = [-1.2, 1].sliced;
     auto l = x.shape.slice(-double.infinity);
     auto u = x.shape.slice(+double.infinity);
@@ -308,24 +300,24 @@ version(mir_optim_test)
         }
     }
 
-    lm.optimize!(rosenbrockRes, FFF)(2, x, l, u);
+    settings.optimize!(rosenbrockRes, FFF)(2, x, l, u);
 
     // import std.stdio;
 
-    // writeln(lm.iterCt, " ", lm.fCalls, " ", lm.gCalls, " x = ", x);
+    // writeln(settings.iterCt, " ", settings.fCalls, " ", settings.gCalls, " x = ", x);
 
     assert(nrm2((x - [1, 1].sliced).slice) < 1e-8);
 
     /////
 
-    lm.reset;
+    settings = settings.init;
     x[] = [150.0, 150.0];
     l[] = [10.0, 10.0];
     u[] = [200.0, 200.0];
 
-    lm.optimize!(rosenbrockRes, rosenbrockJac)(2, x, l, u);
+    settings.optimize!(rosenbrockRes, rosenbrockJac)(2, x, l, u);
 
-    // writeln(lm.iterCt, " ", lm.fCalls, " ", lm.gCalls, " ", x);
+    // writeln(settings.iterCt, " ", settings.fCalls, " ", settings.gCalls, " ", x);
     assert(nrm2((x - [10, 100].sliced).slice) < 1e-5);
     assert(x.all!"a >= 10");
 }
@@ -356,8 +348,8 @@ version(mir_optim_test)
     auto l = x.shape.slice(-double.infinity);
     auto u = x.shape.slice(+double.infinity);
 
-    LeastSquares!double lm;
-    lm.optimize!((p, y) => y[] = model(xdata, p) - ydata)(ydata.length, x, l, u);
+    LeastSquaresSettings!double settings;
+    settings.optimize!((p, y) => y[] = model(xdata, p) - ydata)(ydata.length, x, l, u);
 
     assert((x - [1.0, 2.0].sliced).slice.nrm2 < 0.05);
 }
@@ -381,13 +373,13 @@ version(mir_optim_test)
     auto rng = Random(12345);
     auto ydata = slice(model(xdata, [10.0, 10.0, 10.0]) + 0.1 * rng.randomSlice(normalVar, xdata.shape));
 
-    LeastSquares!double lm;
+    LeastSquaresSettings!double settings;
 
     auto x = [15.0, 15.0, 15.0].sliced;
     auto l = [5.0, 11.0, 5.0].sliced;
     auto u = x.shape.slice(+double.infinity);
 
-    lm.optimize!((p, y) => y[] = model(xdata, p) - ydata)
+    settings.optimize!((p, y) => y[] = model(xdata, p) - ydata)
         (ydata.length, x, l, u);
 
     assert(all!"a >= b"(x, l));
@@ -395,19 +387,19 @@ version(mir_optim_test)
     // import std.stdio;
 
     // writeln(x);
-    // writeln(lm.iterCt, " ", lm.fCalls, " ", lm.gCalls);
+    // writeln(settings.iterCt, " ", settings.fCalls, " ", settings.gCalls);
 
-    lm.reset;
+    settings = settings.init;
     x[] = [5.0, 5.0, 5.0];
     l[] = -double.infinity;
     u[] = [15.0, 9.0, 15.0];
-    lm.optimize!((p, y) => y[] = model(xdata, p) - ydata)
+    settings.optimize!((p, y) => y[] = model(xdata, p) - ydata)
         (ydata.length, x, l , u);
 
     assert(x.all!"a <= b"(u));
 
     // writeln(x);
-    // writeln(lm.iterCt, " ", lm.fCalls, " ", lm.gCalls);
+    // writeln(settings.iterCt, " ", settings.fCalls, " ", settings.gCalls);
 }
 
 ///
@@ -419,11 +411,11 @@ version(mir_optim_test)
     import mir.ndslice.allocation: slice;
     import mir.ndslice.slice: sliced;
 
-    LeastSquares!double lm;
+    LeastSquaresSettings!double settings;
     auto x = [0.001, 0.0001].sliced;
     auto l = [-0.5, -0.5].sliced;
     auto u = [0.5, 0.5].sliced;
-    lm.optimize!(
+    settings.optimize!(
         (x, y)
         {
             y[0] = sqrt(1 - (x[0] ^^ 2 + x[1] ^^ 2));
@@ -436,7 +428,7 @@ version(mir_optim_test)
 /++
 High level nothtow D API for Levenberg-Marquardt Algorithm.
 
-Computes the argmin over x of `sum_i(f(x_i)^2)` using the Modified Levenberg-Marquardt
+Computes the argmin over x of `sum_i(f(x_i)^2)` using the Least-Squares
 algorithm, and an estimate of the Jacobian of `f` at x.
 
 The function `f` should take an input vector of length `n`, and fill an output
@@ -449,11 +441,11 @@ Params:
     f = `n -> m` function
     g = `m × n` Jacobian (optional)
     tm = thread manager for finite difference jacobian approximation in case of g is null (optional)
-    lm = Levenberg-Marquardt data structure
+    settings = Levenberg-Marquardt data structure
 See_also: $(LREF optimize)
 +/
-LeastSquaresStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
-    scope ref LeastSquares!T lm,
+LeastSquaresResult!T optimizeImpl(alias f, alias g = null, alias tm = null, T)(
+    scope ref LeastSquaresSettings!T settings,
     size_t m,
     Slice!(T*) x,
     Slice!(const(T)*) l,
@@ -499,7 +491,7 @@ LeastSquaresStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
         static if (isNullableFunction!(tm))
             if (!tm)
                 tmInst = null;
-        if (false) with(lm)
+        if (false) with(settings)
             tmInst(0, null);
     }
 
@@ -509,7 +501,7 @@ LeastSquaresStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
     auto iwork = rcslice!lapackint(mir_least_sqaures_iwork_length(m, n));
     auto workS = work.lightScope;
     auto iworkS = iwork.lightScope;
-    return optimizeLeastSquares!T(lm, m, x, l, u, workS, iworkS, fInst.trustedAllAttr, gInst.trustedAllAttr, tmInst.trustedAllAttr);
+    return optimizeLeastSquares!T(settings, m, x, l, u, workS, iworkS, fInst.trustedAllAttr, gInst.trustedAllAttr, tmInst.trustedAllAttr);
 }
 
 /++
@@ -568,15 +560,15 @@ alias LeastSquaresThreadManager = void delegate(
 /++
 Low level `extern(D)` instatiation.
 Params:
-    lm = Levenberg-Marquardt data structure
+    settings = Levenberg-Marquardt data structure
     f = `n -> m` function
     g = `m × n` Jacobian (optional)
     tm = thread manager for finite difference jacobian approximation in case of g is null (optional)
 +/
 pragma(inline, false)
-LeastSquaresStatus optimizeLeastSquaresD
+LeastSquaresResult!double optimizeLeastSquaresD
     (
-        scope ref LeastSquares!double lm,
+        scope ref LeastSquaresSettings!double settings,
         size_t m,
         Slice!(double*) x,
         Slice!(const(double)*) l,
@@ -588,15 +580,15 @@ LeastSquaresStatus optimizeLeastSquaresD
         scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
-    return optimizeLeastSquaresImplGeneric!double(lm, m, x, l, u, work, iwork, f, g, tm);
+    return optimizeLeastSquaresImplGeneric!double(settings, m, x, l, u, work, iwork, f, g, tm);
 }
 
 
 /// ditto
 pragma(inline, false)
-LeastSquaresStatus optimizeLeastSquaresS
+LeastSquaresResult!float optimizeLeastSquaresS
     (
-        scope ref LeastSquares!float lm,
+        scope ref LeastSquaresSettings!float settings,
         size_t m,
         Slice!(float*) x,
         Slice!(const(float)*) l,
@@ -608,7 +600,7 @@ LeastSquaresStatus optimizeLeastSquaresS
         scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
-    return optimizeLeastSquaresImplGeneric!float(lm, 2, x, l, u, work, iwork, f, g, tm);
+    return optimizeLeastSquaresImplGeneric!float(settings, 2, x, l, u, work, iwork, f, g, tm);
 }
 
 /// ditto
@@ -662,7 +654,7 @@ extern(C) @safe nothrow @nogc
     /++
     Low level `extern(C)` wrapper instatiation.
     Params:
-        lm = Levenberg-Marquardt data structure
+        settings = Levenberg-Marquardt data structure
         fContext = context for the function
         f = `n -> m` function
         gContext = context for the Jacobian (optional)
@@ -671,9 +663,9 @@ extern(C) @safe nothrow @nogc
     +/
     extern(C)
     pragma(inline, false)
-    LeastSquaresStatus mir_optimize_least_squares_d
+    LeastSquaresResult!double mir_optimize_least_squares_d
         (
-            scope ref LeastSquares!double lm,
+            scope ref LeastSquaresSettings!double settings,
             size_t m,
             size_t n,
             double* x,
@@ -689,15 +681,15 @@ extern(C) @safe nothrow @nogc
             scope LeastSquaresThreadManagerBetterC tm = null,
         ) @system nothrow @nogc pure
     {
-        return optimizeLeastSquaresImplGenericBetterC!double(lm, m, n, x, l, u, work, iwork, fContext, f, gContext, g, tmContext, tm);
+        return optimizeLeastSquaresImplGenericBetterC!double(settings, m, n, x, l, u, work, iwork, fContext, f, gContext, g, tmContext, tm);
     }
 
     /// ditto
     extern(C)
     pragma(inline, false)
-    LeastSquaresStatus mir_optimize_least_squares_s
+    LeastSquaresResult!float mir_optimize_least_squares_s
         (
-            scope ref LeastSquares!float lm,
+            scope ref LeastSquaresSettings!float settings,
             size_t m,
             size_t n,
             float* x,
@@ -713,7 +705,7 @@ extern(C) @safe nothrow @nogc
             scope LeastSquaresThreadManagerBetterC tm = null,
         ) @system nothrow @nogc pure
     {
-        return optimizeLeastSquaresImplGenericBetterC!float(lm, m, n, x, l, u, work, iwork, fContext, f, gContext, g, tmContext, tm);
+        return optimizeLeastSquaresImplGenericBetterC!float(settings, m, n, x, l, u, work, iwork, fContext, f, gContext, g, tmContext, tm);
     }
 
     /// ditto
@@ -725,17 +717,17 @@ extern(C) @safe nothrow @nogc
     /++
     Initialize LM data structure with default params for iteration.
     Params:
-        lm = Levenberg-Marquart data structure
+        settings = Levenberg-Marquart data structure
     +/
-    void mir_least_squares_init_d(ref LeastSquares!double lm) pure
+    void mir_least_squares_init_d(ref LeastSquaresSettings!double settings) pure
     {
-        lm = lm.init;
+        settings = settings.init;
     }
 
     /// ditto
-    void mir_least_squares_init_s(ref LeastSquares!float lm) pure
+    void mir_least_squares_init_s(ref LeastSquaresSettings!float settings) pure
     {
-        lm = lm.init;
+        settings = settings.init;
     }
 
     /// ditto
@@ -747,17 +739,17 @@ extern(C) @safe nothrow @nogc
     /++
     Resets all counters and flags, fills `x`, `y`, `upper`, `lower`, vecors with default values.
     Params:
-        lm = Levenberg-Marquart data structure
+        settings = Levenberg-Marquart data structure
     +/
-    void mir_least_squares_reset_d(ref LeastSquares!double lm) pure
+    void mir_least_squares_reset_d(ref LeastSquaresSettings!double settings) pure
     {
-        lm.reset;
+        settings = settings.init;
     }
 
     /// ditto
-    void mir_least_squares_reset_s(ref LeastSquares!float lm) pure
+    void mir_least_squares_reset_s(ref LeastSquaresSettings!float settings) pure
     {
-        lm.reset;
+        settings = settings.init;
     }
 
     /// ditto
@@ -769,9 +761,9 @@ extern(C) @safe nothrow @nogc
 
 private:
 
-LeastSquaresStatus optimizeLeastSquaresImplGenericBetterC(T)
+LeastSquaresResult!T optimizeLeastSquaresImplGenericBetterC(T)
     (
-        scope ref LeastSquares!T lm,
+        scope ref LeastSquaresSettings!T settings,
         size_t m,
         size_t n,
         T* x,
@@ -791,7 +783,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGenericBetterC(T)
 
     if (g)
         return optimizeLeastSquares!T(
-            lm,
+            settings,
             m,
             x[0 .. n].sliced,
             l[0 .. n].sliced,
@@ -810,7 +802,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGenericBetterC(T)
 
     if (tm)
         return optimizeLeastSquares!T(
-            lm,
+            settings,
             m,
             x[0 .. n].sliced,
             l[0 .. n].sliced,
@@ -822,7 +814,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGenericBetterC(T)
             (count, scope LeastSquaresTask task) @trusted => tm(tmContext, count, task, taskFunction)
         );
     return optimizeLeastSquares!T(
-        lm,
+        settings,
         m,
         x[0 .. n].sliced,
         l[0 .. n].sliced,
@@ -843,9 +835,9 @@ if (isFunctionPointer!T || isDelegate!T)
 }
 
 // LM algorithm
-LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
+LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
     (
-        scope ref LeastSquares!T lm,
+        scope ref LeastSquaresSettings!T settings,
         size_t m,
         Slice!(T*) x,
         Slice!(const(T)*) lower,
@@ -856,7 +848,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
         scope LeastSquaresJacobian!T g,
         scope LeastSquaresThreadManager tm,
     ) @trusted nothrow @nogc pure
-{with(lm){
+{ typeof(return) ret; with(ret) with(settings){
     pragma(inline, false);
     import mir.algorithm.iteration: all;
     import mir.blas;
@@ -905,19 +897,19 @@ LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
     version(LDC) pragma(inline, true);
 
     if (m == 0 || n == 0 || !x.all!"-a.infinity < a && a < a.infinity")
-        return lm.status = LeastSquaresStatus.badGuess; 
+        { status = LeastSquaresStatus.badGuess; return ret; }
     if (!allLessOrEqual(lower, x) || !allLessOrEqual(x, upper))
-        return lm.status = LeastSquaresStatus.badBounds; 
+        { status = LeastSquaresStatus.badBounds; return ret; }
     if (!(0 <= minStepQuality && minStepQuality < 1))
-        return lm.status = LeastSquaresStatus.badMinStepQuality;
+        { status = LeastSquaresStatus.badMinStepQuality; return ret; }
     if (!(0 <= goodStepQuality && goodStepQuality <= 1))
-        return lm.status = LeastSquaresStatus.badGoodStepQuality;
+        { status = LeastSquaresStatus.badGoodStepQuality; return ret; }
     if (!(minStepQuality < goodStepQuality))
-        return lm.status = LeastSquaresStatus.badStepQuality;
+        { status = LeastSquaresStatus.badStepQuality; return ret; }
     if (!(1 <= lambdaIncrease && lambdaIncrease <= T.max.sqrt))
-        return lm.status = LeastSquaresStatus.badLambdaParams;
+        { status = LeastSquaresStatus.badLambdaParams; return ret; }
     if (!(T.min_normal.sqrt <= lambdaDecrease && lambdaDecrease <= 1))
-        return lm.status = LeastSquaresStatus.badLambdaParams;
+        { status = LeastSquaresStatus.badLambdaParams; return ret; }
 
     maxAge = maxAge ? maxAge : g ? 3 : 2 * n;
 
@@ -957,7 +949,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
             mu = 1;
         }
         if (!allLessOrEqual(x, x))
-            return lm.status = LeastSquaresStatus.numericError;
+            { status = LeastSquaresStatus.numericError; return ret; }
         if (needJacobian)
         {
             needJacobian = false;
@@ -1045,12 +1037,9 @@ LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
         axpy(-1, x, qpu);
         copy(JJ.diagonal, nBuffer);
         JJ.diagonal[] += lambda;
-        BoxQPSettings!T settings;
-        settings.absTolerance = T.epsilon * 16;
-        settings.relTolerance = T.epsilon * 16;
-        if (settings.solveBoxQP(JJ.canonical, Jy, qpl, qpu, deltaX, false, qpwork, iwork, false) != BoxQPStatus.solved)
+        if (qpSettings.solveBoxQP(JJ.canonical, Jy, qpl, qpu, deltaX, false, qpwork, iwork, false) != BoxQPStatus.solved)
         {
-            return lm.status = LeastSquaresStatus.numericError;
+            { status = LeastSquaresStatus.numericError; return ret; }
         }
 
         copy(nBuffer, JJ.diagonal);
@@ -1068,7 +1057,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
         auto trialResidual = dot(mBuffer, mBuffer);
 
         if (!(trialResidual.fabs <= T.max))
-            return lm.status = LeastSquaresStatus.numericError;
+            { status = LeastSquaresStatus.numericError; return ret; }
 
         auto improvement = residual - trialResidual;
         if (!(improvement > 0))
@@ -1084,7 +1073,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
         mu = 1;
         iterCt++;
         // if (!(deltaX_dot <= 1 - T.epsilon))
-        //     return lm.status = LeastSquaresStatus.numericError;
+        // return status = LeastSquaresStatus.numericError;     { ret; }
         copy(nBuffer, x);
         swap(mBuffer, y);
         residual = trialResidual;
@@ -1126,7 +1115,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
     }
     while (iterCt < maxIter);
 
-    return lm.status = LeastSquaresStatus.success;
+    { status = LeastSquaresStatus.success; return ret; }
 }}
 
 pragma(inline, false)
