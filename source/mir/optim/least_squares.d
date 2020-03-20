@@ -856,32 +856,31 @@ LMStatus optimizeLMImplGeneric(T)
 
     uint n = cast(uint)x.length;
 
-    auto iwork = assumePure(&stdcUninitSlice!(lapackint, 1))([n]);
-    auto bwork = assumePure(&stdcUninitSlice!(byte, 1))([n]);
-    auto deltaX = assumePure(&stdcUninitSlice!(T, 1))([n]);
-    auto Jy = assumePure(&stdcUninitSlice!(T, 1))([n]);
-    auto deltaXBase = assumePure(&stdcUninitSlice!(T, 1))([n]);
-    auto y = assumePure(&stdcUninitSlice!(T, 1))([m]);
-    auto mBuffer = assumePure(&stdcUninitSlice!(T, 1))([m]);
-    auto nBuffer = assumePure(&stdcUninitSlice!(T, 1))([n]);
-    auto JJ = assumePure(&stdcUninitSlice!(T, 2))([n, n]);
-    auto J = assumePure(&stdcUninitSlice!(T, 2))([m, n]);
-    auto work = assumePure(&stdcUninitSlice!(T, 1))([boxQPWorkLength(n) + n * 2]);
+    auto workData = assumePure(&stdcUninitSlice!(T, 1))([boxQPWorkLength(n) + n * 5 + n * n + n * m + m * 2]);
+
+    auto work = workData;
+
+    auto qpl = work[0 .. n]; work = work[n .. $];
+    auto qpu = work[0 .. n]; work = work[n .. $];
+    auto deltaX = work[0 .. n]; work = work[n .. $];
+    auto Jy = work[0 .. n]; work = work[n .. $];
+    auto nBuffer = work[0 .. n]; work = work[n .. $];
+
+    auto JJ = work[0 .. n * n].sliced(n, n); work = work[n * n .. $];
+    auto J = work[0 .. m * n].sliced(m, n); work = work[m * n .. $];
+
+    auto mBuffer = work[0 .. m]; work = work[m .. $];
+    auto y = work[0 .. m]; work = work[m .. $];
+
+    auto qpwork = work;
+
+    auto iwork = assumePure(&stdcUninitSlice!(lapackint, 1))(boxQPIWorkLength(n).max(n));
 
     scope (exit)
     {
         import mir.internal.memory;
         iwork.ptr.free;
-        bwork.ptr.free;
-        deltaX.ptr.free;
-        Jy.ptr.free;
-        deltaXBase.ptr.free;
-        y.ptr.free;
-        mBuffer.ptr.free;
-        nBuffer.ptr.free;
-        JJ.ptr.free;
-        J.ptr.free;
-        work.ptr.free;
+        workData.ptr.free;
     }
 
     version(LDC) pragma(inline, true);
@@ -923,7 +922,7 @@ LMStatus optimizeLMImplGeneric(T)
 
     lambda = 0;
     iterCt = 0;
-    T deltaXBase_dot;
+    T deltaX_dot;
     T mu = 1;
     enum T suspiciousMu = 16;
     do
@@ -945,11 +944,11 @@ LMStatus optimizeLMImplGeneric(T)
             if (age < maxAge)
             {
                 age++;
-                auto d = 1 / deltaXBase_dot;
+                auto d = 1 / deltaX_dot;
                 axpy(-1, y, mBuffer); // -deltaY
-                gemv(1, J, deltaXBase, 1, mBuffer); //-(f_new - f_old - J_old*h)
+                gemv(1, J, deltaX, 1, mBuffer); //-(f_new - f_old - J_old*h)
                 scal(-d, mBuffer);
-                ger(1, mBuffer, deltaXBase, J); //J_new = J_old + u*h'
+                ger(1, mBuffer, deltaX, J); //J_new = J_old + u*h'
             }
             else
             {
@@ -961,7 +960,7 @@ LMStatus optimizeLMImplGeneric(T)
                 }
                 else
                 {
-                    iwork[] = 0;
+                    iwork[0 .. n] = 0;
                     tm(n, (uint totalThreads, uint threadId, uint j)
                         @trusted pure nothrow @nogc
                         {
@@ -983,12 +982,9 @@ LMStatus optimizeLMImplGeneric(T)
                                 p[j] = xph;
                                 f(p, mBuffer);
                                 copy(mBuffer, Jj);
-
                                 p[j] = xmh;
                                 f(p, mBuffer);
-
                                 p[j] = save;
-
                                 axpy(-1, mBuffer, Jj);
                                 scal(1 / twh, Jj);
                             }
@@ -997,10 +993,21 @@ LMStatus optimizeLMImplGeneric(T)
                                 fill(T(0), Jj);
                             }
                         });
-                    fCalls += iwork.sum;
+                    fCalls += iwork[0 .. n].sum;
                 }
             }
             gemv(1, J.transposed, y, 0, Jy);
+            gConverged = !(Jy[Jy.iamax].fabs > tolG);
+            if (gConverged)
+            {
+                if (age == 0)
+                {
+                    break;
+                }
+                gConverged = false;
+                age = maxAge;
+                continue;
+            }
         }
 
         syrk(Uplo.Lower, 1, J.transposed, 0, JJ);
@@ -1012,28 +1019,27 @@ LMStatus optimizeLMImplGeneric(T)
                 lambda = 1;
         }
 
-        auto l = work[0 .. n];
-        auto u = work[n .. n * 2];
-        l[] = lower - x;
-        u[] = upper - x;
+        copy(lower, qpl);
+        axpy(-1, x, qpl);
+        copy(upper, qpu);
+        axpy(-1, x, qpu);
         copy(JJ.diagonal, nBuffer);
         JJ.diagonal[] += lambda;
         BoxQPSettings!T settings;
         settings.absTolerance = T.epsilon * 16;
         settings.relTolerance = T.epsilon * 16;
-        if (settings.solveBoxQP(JJ.canonical, Jy, l, u, deltaX, false, work[2 * n .. $], iwork, bwork, false) != BoxQPStatus.solved)
+        if (settings.solveBoxQP(JJ.canonical, Jy, qpl, qpu, deltaX, false, qpwork, iwork, false) != BoxQPStatus.solved)
         {
             return lm.status = LMStatus.numericError;
         }
-
 
         copy(nBuffer, JJ.diagonal);
 
         axpy(1, x, deltaX);
         axpy(-1, x, deltaX);
 
-        copy(x, nBuffer);
-        axpy(1, deltaX, nBuffer);
+        copy(deltaX, nBuffer);
+        axpy(1, x, nBuffer);
         applyBounds(nBuffer, lower, upper);
 
         ++fCalls;
@@ -1054,21 +1060,18 @@ LMStatus optimizeLMImplGeneric(T)
             break; // further impovement
         }
 
-        symv(Uplo.Lower, 1, JJ, deltaX, 2, Jy); // use Jy as temporal storage
-        auto predictedImprovement = -dot(Jy, deltaX);
-
+        needJacobian = true;
         mu = 1;
         iterCt++;
-        copy(deltaX, deltaXBase);
-        deltaXBase_dot = dot(deltaXBase, deltaXBase);
-        // if (!(deltaXBase_dot <= 1 - T.epsilon))
+        // if (!(deltaX_dot <= 1 - T.epsilon))
         //     return lm.status = LMStatus.numericError;
         copy(nBuffer, x);
         swap(mBuffer, y);
         residual = trialResidual;
-        needJacobian = true;
+        deltaX_dot = dot(deltaX, deltaX);
 
-        import std.stdio;
+        symv(Uplo.Lower, 1, JJ, deltaX, 2, Jy); // use Jy as temporal storage
+        auto predictedImprovement = -dot(Jy, deltaX);
 
         if (!(predictedImprovement > 0))
         {
@@ -1088,19 +1091,16 @@ LMStatus optimizeLMImplGeneric(T)
             lambda = fmax(lambdaDecrease * lambda * mu, minLambda);
         }
 
-        gemv(1, J.transposed, y, 0, Jy);
-        gConverged = !(Jy[Jy.iamax].fabs > tolG);
-        xConverged = !(deltaXBase_dot.sqrt > tolX);// fmax(tolX, tolX * x.nrm2));
-
-        if (xConverged || gConverged)
+        xConverged = !(deltaX_dot.sqrt > tolX);// fmax(tolX, tolX * x.nrm2));
+        if (xConverged)
         {
             if (age == 0)
             {
                 break;
             }
-            gConverged = false;
             xConverged = false;
             age = maxAge;
+            continue;
         }
     }
     while (iterCt < maxIter);

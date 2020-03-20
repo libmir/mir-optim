@@ -35,7 +35,15 @@ enum BoxQPStatus
 @safe pure nothrow @nogc
 size_t boxQPWorkLength(size_t n)
 {
-    return n ^^ 2 * 2 + n * 8;
+    return n * n * 2 + n * 8;
+}
+
+/++
++/
+@safe pure nothrow @nogc
+size_t boxQPIWorkLength(size_t n)
+{
+    return n + (n / lapackint.sizeof + (n % lapackint.sizeof != 0));
 }
 
 /++
@@ -103,8 +111,7 @@ Params:
     x = solutoin, N
     unconstrainedSolution = 
     work = workspace, boxQPWorkLength(N)
-    iwork = integer workspace, N
-    bwork = byte workspace, N
+    iwork = integer workspace, boxQPIWorkLength(N)
     restoreUpperP = (optional) restore upper triangular part of P
 +/
 @safe pure nothrow @nogc
@@ -118,7 +125,6 @@ BoxQPStatus solveBoxQP(T)(
     bool unconstrainedSolution,
     Slice!(T*) work,
     Slice!(lapackint*) iwork,
-    Slice!(byte*) bwork,
     bool restoreUpperP = true,
 )
     if (is(T == float) || is(T == double))
@@ -130,9 +136,8 @@ in {
     assert(l.length == n);
     assert(u.length == n);
     assert(x.length == n);
-    assert(iwork.length == n);
-    assert(bwork.length == n);
     assert(work.length >= boxQPWorkLength(n));
+    assert(iwork.length >= boxQPIWorkLength(n));
 }
 do {
     import mir.math.sum;
@@ -150,8 +155,12 @@ do {
     }
 
     auto n = q.length;
+
     if (n == 0)
         return BoxQPStatus.solved;
+
+    auto bwork = iwork[n .. $];
+    iwork = iwork[0 .. n];
 
     if (!unconstrainedSolution)
     {
@@ -178,7 +187,7 @@ do {
             ferr,
             berr,
             lapackWorkSpace,
-            iwork.lightScope);
+            iwork);
 
         if (info != 0 && info != n + 1)
             return BoxQPStatus.numericError;
@@ -237,7 +246,7 @@ Start:
                 break;
 
             {
-                auto SIWorkspace = iwork.lightScope[0 .. s];
+                auto SIWorkspace = iwork[0 .. s];
                 auto buffer = work;
                 auto scaling = buffer[0 .. s]; buffer = buffer[s .. $];
                 auto sX = buffer[0 .. s]; buffer = buffer[s .. $];
