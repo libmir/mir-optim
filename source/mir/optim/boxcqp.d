@@ -35,7 +35,7 @@ enum BoxQPStatus
 @safe pure nothrow @nogc
 size_t boxQPWorkLength(size_t n)
 {
-    return n * n * 2 + n * 8;
+    return n * n + n * 8;
 }
 
 /++
@@ -104,7 +104,9 @@ Solves:
     `argmin_x(xPx + qx) : l <= x <= u`
 Params:
     settings = Iteration settings
-    P = Positive-definite Matrix (in lower triangular part is store), NxN. The upper triangular part of the matrix is used for temporary data and then can be resotored.
+    P = Positive-definite Matrix (in lower triangular part is store), NxN.
+        The upper triangular part (and diagonal) of the matrix is used for temporary data and then can be resotored.
+        Matrix diagonal is always restored.
     q = Linear component, N
     l = Lower bounds in [-inf, +inf), N
     u = Upper bounds in (-inf, +inf], N
@@ -140,12 +142,13 @@ in {
     assert(iwork.length >= boxQPIWorkLength(n));
 }
 do {
-    import mir.math.sum;
+    import mir.algorithm.iteration: eachUploPair;
     import mir.blas: dot, copy;
     import mir.lapack: posvx;
+    import mir.math.sum;
     import mir.ndslice.mutation: copyMinor;
     import mir.ndslice.slice: sliced;
-    import mir.ndslice.topology: canonical;
+    import mir.ndslice.topology: canonical, diagonal;
 
     enum Flag : byte
     {
@@ -165,19 +168,20 @@ do {
     if (!unconstrainedSolution)
     {
         auto buffer = work;
+        auto Pdiagonal = buffer[0 .. n]; buffer = buffer[n .. $];
         auto scaling = buffer[0 .. n]; buffer = buffer[n .. $];
         auto b = buffer[0 .. n]; buffer = buffer[n .. $];
         auto lapackWorkSpace = buffer[0 .. n * 3]; buffer = buffer[n * 3 .. $];
-        auto A = buffer[0 .. n ^^ 2].sliced(n, n); buffer = buffer[n ^^ 2 .. $];
         auto F = buffer[0 .. n ^^ 2].sliced(n, n); buffer = buffer[n ^^ 2 .. $];
 
-        A[] = P;
-        b[] = -q;
 
         char equed;
         T rcond, ferr, berr;
-        auto info = posvx('E', 'U',
-            A.canonical,
+        P.eachUploPair!("a = b", false);
+        copy(P.diagonal, Pdiagonal);
+        b[] = -q;
+        auto info = posvx('E', 'L',
+            P.canonical,
             F.canonical,
             equed,
             scaling,
@@ -188,6 +192,7 @@ do {
             berr,
             lapackWorkSpace,
             iwork);
+        copy(Pdiagonal, P.diagonal);
 
         if (info != 0 && info != n + 1)
             return BoxQPStatus.numericError;
@@ -252,13 +257,8 @@ Start:
                 auto sX = buffer[0 .. s]; buffer = buffer[s .. $];
                 auto b = buffer[0 .. s]; buffer = buffer[s .. $];
                 auto lapackWorkSpace = buffer[0 .. s * 3]; buffer = buffer[s * 3 .. $];
-                // auto A = buffer[0 .. s ^^ 2].sliced(s, s); buffer = buffer[s ^^ 2 .. $];
                 auto F = buffer[0 .. s ^^ 2].sliced(s, s); buffer = buffer[s ^^ 2 .. $];
-
                 auto A = P[0 .. $ - 1, 1 .. $][$ - s .. $, $ - s .. $];
-                // auto A = P[0 .. s, $ - s .. $];
-
-                // copyMinor(P, A, SIWorkspace, SIWorkspace);
 
                 foreach (ii, i; SIWorkspace.field)
                 {
