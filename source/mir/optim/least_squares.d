@@ -48,13 +48,13 @@ version(D_Exceptions)
     Exception for $(LREF optimize).
     +/
     private static immutable leastSquaresException_initialized = new Exception("mir-optim LM-algorithm: status is 'initialized', zero iterations");
-    private static immutable leastSquaresException_badBounds = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badBounds.lmStatusString);
-    private static immutable leastSquaresException_badGuess = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGuess.lmStatusString);
-    private static immutable leastSquaresException_badMinStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badMinStepQuality.lmStatusString);
-    private static immutable leastSquaresException_badGoodStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGoodStepQuality.lmStatusString);
-    private static immutable leastSquaresException_badStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badStepQuality.lmStatusString);
-    private static immutable leastSquaresException_badLambdaParams = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badLambdaParams.lmStatusString);
-    private static immutable leastSquaresException_numericError = new Exception("mir-optim LM-algorithm: " ~ LMStatus.numericError.lmStatusString);
+    private static immutable leastSquaresException_badBounds = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badBounds.leastSquaresStatusString);
+    private static immutable leastSquaresException_badGuess = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGuess.leastSquaresStatusString);
+    private static immutable leastSquaresException_badMinStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badMinStepQuality.leastSquaresStatusString);
+    private static immutable leastSquaresException_badGoodStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGoodStepQuality.leastSquaresStatusString);
+    private static immutable leastSquaresException_badStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badStepQuality.leastSquaresStatusString);
+    private static immutable leastSquaresException_badLambdaParams = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badLambdaParams.leastSquaresStatusString);
+    private static immutable leastSquaresException_numericError = new Exception("mir-optim LM-algorithm: " ~ LMStatus.numericError.leastSquaresStatusString);
     private static immutable leastSquaresExceptions = [
         leastSquaresException_initialized,
         leastSquaresException_badBounds,
@@ -544,7 +544,7 @@ Params:
 Returns: description for $(LMStatus)
 +/
 pragma(inline, false)
-string lmStatusString(LMStatus st) @safe pure nothrow @nogc
+string leastSquaresStatusString(LMStatus st) @safe pure nothrow @nogc
 {
     final switch(st) with(LMStatus)
     {
@@ -672,7 +672,7 @@ extern(C) @safe nothrow @nogc
     pragma(inline, false)
     immutable(char)* mir_least_squares_status_string(LMStatus st) @trusted pure nothrow @nogc
     {
-        return st.lmStatusString.ptr;
+        return st.leastSquaresStatusString.ptr;
     }
 
     /// Thread manager function type for low level `extern(C)` API.
@@ -699,8 +699,8 @@ extern(C) @safe nothrow @nogc
     LMStatus mir_optimize_least_squares_d
         (
             scope ref LeastSquares!double lm,
-            uint m,
-            uint n,
+            size_t m,
+            size_t n,
             double* x,
             const(double)* l,
             const(double)* u,
@@ -723,8 +723,8 @@ extern(C) @safe nothrow @nogc
     LMStatus mir_optimize_least_squares_s
         (
             scope ref LeastSquares!float lm,
-            uint m,
-            uint n,
+            size_t m,
+            size_t n,
             float* x,
             const(float)* l,
             const(float)* u,
@@ -797,8 +797,8 @@ private:
 LMStatus optimizeLeastSquaresImplGenericBetterC(T)
     (
         scope ref LeastSquares!T lm,
-        uint m,
-        uint n,
+        size_t m,
+        size_t n,
         T* x,
         const(T)* l,
         const(T)* u,
