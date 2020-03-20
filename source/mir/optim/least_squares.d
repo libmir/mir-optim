@@ -20,7 +20,7 @@ public import std.typecons: Flag, Yes, No;
 version = mir_optim_test;
 
 ///
-enum LMStatus
+enum LeastSquaresStatus
 {
     ///
     success = 0,
@@ -48,13 +48,13 @@ version(D_Exceptions)
     Exception for $(LREF optimize).
     +/
     private static immutable leastSquaresException_initialized = new Exception("mir-optim LM-algorithm: status is 'initialized', zero iterations");
-    private static immutable leastSquaresException_badBounds = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badBounds.leastSquaresStatusString);
-    private static immutable leastSquaresException_badGuess = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGuess.leastSquaresStatusString);
-    private static immutable leastSquaresException_badMinStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badMinStepQuality.leastSquaresStatusString);
-    private static immutable leastSquaresException_badGoodStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGoodStepQuality.leastSquaresStatusString);
-    private static immutable leastSquaresException_badStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badStepQuality.leastSquaresStatusString);
-    private static immutable leastSquaresException_badLambdaParams = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badLambdaParams.leastSquaresStatusString);
-    private static immutable leastSquaresException_numericError = new Exception("mir-optim LM-algorithm: " ~ LMStatus.numericError.leastSquaresStatusString);
+    private static immutable leastSquaresException_badBounds = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badBounds.leastSquaresStatusString);
+    private static immutable leastSquaresException_badGuess = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badGuess.leastSquaresStatusString);
+    private static immutable leastSquaresException_badMinStepQuality = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badMinStepQuality.leastSquaresStatusString);
+    private static immutable leastSquaresException_badGoodStepQuality = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badGoodStepQuality.leastSquaresStatusString);
+    private static immutable leastSquaresException_badStepQuality = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badStepQuality.leastSquaresStatusString);
+    private static immutable leastSquaresException_badLambdaParams = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badLambdaParams.leastSquaresStatusString);
+    private static immutable leastSquaresException_numericError = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.numericError.leastSquaresStatusString);
     private static immutable leastSquaresExceptions = [
         leastSquaresException_initialized,
         leastSquaresException_badBounds,
@@ -126,7 +126,7 @@ struct LeastSquares(T)
     /// ditto
     uint maxAge;
     /// ditto
-    LMStatus status = LMStatus.initialized;
+    LeastSquaresStatus status = LeastSquaresStatus.initialized;
     /// ditto
     bool xConverged;
     /// ditto
@@ -150,7 +150,7 @@ struct LeastSquares(T)
         gCalls = 0;     
         residual = T.infinity;
         maxAge = 0;
-        status = LMStatus.initialized;
+        status = LeastSquaresStatus.initialized;
         xConverged = false;
         gConverged = false;    
     }
@@ -455,7 +455,7 @@ Params:
     lm = Levenberg-Marquardt data structure
 See_also: $(LREF optimize)
 +/
-LMStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
+LeastSquaresStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
     scope ref LeastSquares!T lm,
     size_t m,
     Slice!(T*) x,
@@ -519,12 +519,12 @@ LMStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
 Status string for low (extern) and middle (nothrow) levels D API.
 Params:
     st = optimization status
-Returns: description for $(LMStatus)
+Returns: description for $(LeastSquaresStatus)
 +/
 pragma(inline, false)
-string leastSquaresStatusString(LMStatus st) @safe pure nothrow @nogc
+string leastSquaresStatusString(LeastSquaresStatus st) @safe pure nothrow @nogc
 {
-    final switch(st) with(LMStatus)
+    final switch(st) with(LeastSquaresStatus)
     {
         case success:
             return "success";
@@ -577,7 +577,7 @@ Params:
     tm = thread manager for finite difference jacobian approximation in case of g is null (optional)
 +/
 pragma(inline, false)
-LMStatus optimizeLeastSquaresD
+LeastSquaresStatus optimizeLeastSquaresD
     (
         scope ref LeastSquares!double lm,
         size_t m,
@@ -597,7 +597,7 @@ LMStatus optimizeLeastSquaresD
 
 /// ditto
 pragma(inline, false)
-LMStatus optimizeLeastSquaresS
+LeastSquaresStatus optimizeLeastSquaresS
     (
         scope ref LeastSquares!float lm,
         size_t m,
@@ -644,11 +644,11 @@ extern(C) @safe nothrow @nogc
     Status string for extern(C) API.
     Params:
         st = optimization status
-    Returns: description for $(LMStatus)
+    Returns: description for $(LeastSquaresStatus)
     +/
     extern(C)
     pragma(inline, false)
-    immutable(char)* mir_least_squares_status_string(LMStatus st) @trusted pure nothrow @nogc
+    immutable(char)* mir_least_squares_status_string(LeastSquaresStatus st) @trusted pure nothrow @nogc
     {
         return st.leastSquaresStatusString.ptr;
     }
@@ -674,7 +674,7 @@ extern(C) @safe nothrow @nogc
     +/
     extern(C)
     pragma(inline, false)
-    LMStatus mir_optimize_least_squares_d
+    LeastSquaresStatus mir_optimize_least_squares_d
         (
             scope ref LeastSquares!double lm,
             size_t m,
@@ -698,7 +698,7 @@ extern(C) @safe nothrow @nogc
     /// ditto
     extern(C)
     pragma(inline, false)
-    LMStatus mir_optimize_least_squares_s
+    LeastSquaresStatus mir_optimize_least_squares_s
         (
             scope ref LeastSquares!float lm,
             size_t m,
@@ -772,7 +772,7 @@ extern(C) @safe nothrow @nogc
 
 private:
 
-LMStatus optimizeLeastSquaresImplGenericBetterC(T)
+LeastSquaresStatus optimizeLeastSquaresImplGenericBetterC(T)
     (
         scope ref LeastSquares!T lm,
         size_t m,
@@ -846,7 +846,7 @@ if (isFunctionPointer!T || isDelegate!T)
 }
 
 // LM algorithm
-LMStatus optimizeLeastSquaresImplGeneric(T)
+LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
     (
         scope ref LeastSquares!T lm,
         size_t m,
@@ -908,19 +908,19 @@ LMStatus optimizeLeastSquaresImplGeneric(T)
     version(LDC) pragma(inline, true);
 
     if (m == 0 || n == 0 || !x.all!"-a.infinity < a && a < a.infinity")
-        return lm.status = LMStatus.badGuess; 
+        return lm.status = LeastSquaresStatus.badGuess; 
     if (!allLessOrEqual(lower, x) || !allLessOrEqual(x, upper))
-        return lm.status = LMStatus.badBounds; 
+        return lm.status = LeastSquaresStatus.badBounds; 
     if (!(0 <= minStepQuality && minStepQuality < 1))
-        return lm.status = LMStatus.badMinStepQuality;
+        return lm.status = LeastSquaresStatus.badMinStepQuality;
     if (!(0 <= goodStepQuality && goodStepQuality <= 1))
-        return lm.status = LMStatus.badGoodStepQuality;
+        return lm.status = LeastSquaresStatus.badGoodStepQuality;
     if (!(minStepQuality < goodStepQuality))
-        return lm.status = LMStatus.badStepQuality;
+        return lm.status = LeastSquaresStatus.badStepQuality;
     if (!(1 <= lambdaIncrease && lambdaIncrease <= T.max.sqrt))
-        return lm.status = LMStatus.badLambdaParams;
+        return lm.status = LeastSquaresStatus.badLambdaParams;
     if (!(T.min_normal.sqrt <= lambdaDecrease && lambdaDecrease <= 1))
-        return lm.status = LMStatus.badLambdaParams;
+        return lm.status = LeastSquaresStatus.badLambdaParams;
 
     maxAge = maxAge ? maxAge : g ? 3 : 2 * n;
 
@@ -959,7 +959,7 @@ LMStatus optimizeLeastSquaresImplGeneric(T)
             mu = 1;
         }
         if (!allLessOrEqual(x, x))
-            return lm.status = LMStatus.numericError;
+            return lm.status = LeastSquaresStatus.numericError;
         if (needJacobian)
         {
             needJacobian = false;
@@ -1052,7 +1052,7 @@ LMStatus optimizeLeastSquaresImplGeneric(T)
         settings.relTolerance = T.epsilon * 16;
         if (settings.solveBoxQP(JJ.canonical, Jy, qpl, qpu, deltaX, false, qpwork, iwork, false) != BoxQPStatus.solved)
         {
-            return lm.status = LMStatus.numericError;
+            return lm.status = LeastSquaresStatus.numericError;
         }
 
         copy(nBuffer, JJ.diagonal);
@@ -1070,7 +1070,7 @@ LMStatus optimizeLeastSquaresImplGeneric(T)
         auto trialResidual = dot(mBuffer, mBuffer);
 
         if (!(trialResidual.fabs <= T.max))
-            return lm.status = LMStatus.numericError;
+            return lm.status = LeastSquaresStatus.numericError;
 
         auto improvement = residual - trialResidual;
         if (!(improvement > 0))
@@ -1086,7 +1086,7 @@ LMStatus optimizeLeastSquaresImplGeneric(T)
         mu = 1;
         iterCt++;
         // if (!(deltaX_dot <= 1 - T.epsilon))
-        //     return lm.status = LMStatus.numericError;
+        //     return lm.status = LeastSquaresStatus.numericError;
         copy(nBuffer, x);
         swap(mBuffer, y);
         residual = trialResidual;
@@ -1127,7 +1127,7 @@ LMStatus optimizeLeastSquaresImplGeneric(T)
     }
     while (iterCt < maxIter);
 
-    return lm.status = LMStatus.success;
+    return lm.status = LeastSquaresStatus.success;
 }}
 
 pragma(inline, false)
