@@ -133,10 +133,7 @@ struct LeastSquares(T)
     bool gConverged;
     /// ditto
     /// `residual <= maxGoodResidual`
-    bool fConverged()() const @property
-    {
-        return residual <= maxGoodResidual;
-    }
+    bool fConverged;
 
     /++
     Resets all counters and flags, fills `x`, `y`, `upper`, `lower`, vecors with default values.
@@ -933,6 +930,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
     f(x, y);
     ++fCalls;
     residual = dot(y, y);
+    fConverged = residual <= maxGoodResidual;
 
 
     bool needJacobian = true;
@@ -1090,6 +1088,7 @@ LeastSquaresStatus optimizeLeastSquaresImplGeneric(T)
         copy(nBuffer, x);
         swap(mBuffer, y);
         residual = trialResidual;
+        fConverged = residual <= maxGoodResidual;
         deltaX_dot = dot(deltaX, deltaX);
 
         symv(Uplo.Lower, 1, JJ, deltaX, 2, Jy); // use Jy as temporal storage
