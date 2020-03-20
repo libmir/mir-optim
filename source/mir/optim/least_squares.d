@@ -13,7 +13,8 @@ module mir.optim.least_squares;
 import mir.ndslice.slice: Slice, SliceKind, Contiguous, sliced;
 import std.meta;
 import std.traits;
-  
+import lapack: lapackint;
+
 public import std.typecons: Flag, Yes, No;
 
 version = mir_optim_test;
@@ -46,30 +47,30 @@ version(D_Exceptions)
     /+
     Exception for $(LREF optimize).
     +/
-    private static immutable leastSquaresLMException_initialized = new Exception("mir-optim LM-algorithm: status is 'initialized', zero iterations");
-    private static immutable leastSquaresLMException_badBounds = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badBounds.lmStatusString);
-    private static immutable leastSquaresLMException_badGuess = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGuess.lmStatusString);
-    private static immutable leastSquaresLMException_badMinStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badMinStepQuality.lmStatusString);
-    private static immutable leastSquaresLMException_badGoodStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGoodStepQuality.lmStatusString);
-    private static immutable leastSquaresLMException_badStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badStepQuality.lmStatusString);
-    private static immutable leastSquaresLMException_badLambdaParams = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badLambdaParams.lmStatusString);
-    private static immutable leastSquaresLMException_numericError = new Exception("mir-optim LM-algorithm: " ~ LMStatus.numericError.lmStatusString);
-    private static immutable leastSquaresLMExceptions = [
-        leastSquaresLMException_initialized,
-        leastSquaresLMException_badBounds,
-        leastSquaresLMException_badGuess,
-        leastSquaresLMException_badMinStepQuality,
-        leastSquaresLMException_badGoodStepQuality,
-        leastSquaresLMException_badStepQuality,
-        leastSquaresLMException_badLambdaParams,
-        leastSquaresLMException_numericError,
+    private static immutable leastSquaresException_initialized = new Exception("mir-optim LM-algorithm: status is 'initialized', zero iterations");
+    private static immutable leastSquaresException_badBounds = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badBounds.lmStatusString);
+    private static immutable leastSquaresException_badGuess = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGuess.lmStatusString);
+    private static immutable leastSquaresException_badMinStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badMinStepQuality.lmStatusString);
+    private static immutable leastSquaresException_badGoodStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badGoodStepQuality.lmStatusString);
+    private static immutable leastSquaresException_badStepQuality = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badStepQuality.lmStatusString);
+    private static immutable leastSquaresException_badLambdaParams = new Exception("mir-optim LM-algorithm: " ~ LMStatus.badLambdaParams.lmStatusString);
+    private static immutable leastSquaresException_numericError = new Exception("mir-optim LM-algorithm: " ~ LMStatus.numericError.lmStatusString);
+    private static immutable leastSquaresExceptions = [
+        leastSquaresException_initialized,
+        leastSquaresException_badBounds,
+        leastSquaresException_badGuess,
+        leastSquaresException_badMinStepQuality,
+        leastSquaresException_badGoodStepQuality,
+        leastSquaresException_badStepQuality,
+        leastSquaresException_badLambdaParams,
+        leastSquaresException_numericError,
     ];
 }
 
 /++
 Modified Levenberg-Marquardt parameters, data, and state.
 +/
-struct LeastSquaresLM(T)
+struct LeastSquares(T)
     if (is(T == double) || is(T == float))
 {
 
@@ -188,7 +189,7 @@ vector of length `m`.
 
 The function `g` is the Jacobian of `f`, and should fill a row-major `m x n` matrix. 
 
-Throws: $(LREF LeastSquaresLMException)
+Throws: $(LREF LeastSquaresException)
 Params:
     f = `n -> m` function
     g = `m × n` Jacobian (optional)
@@ -198,7 +199,7 @@ Params:
 See_also: $(LREF optimizeImpl)
 +/
 void optimize(alias f, alias g = null, alias tm = null, T)(
-    scope ref LeastSquaresLM!T lm,
+    scope ref LeastSquares!T lm,
     size_t m,
     Slice!(T*) x,
     Slice!(const(T)*) l,
@@ -207,12 +208,12 @@ void optimize(alias f, alias g = null, alias tm = null, T)(
     if ((is(T == float) || is(T == double)))
 {
     if (auto err = optimizeImpl!(f, g, tm, T)(lm, m, x, l, u))
-        throw leastSquaresLMExceptions[err == 1 ? 0 : err + 33];
+        throw leastSquaresExceptions[err == 1 ? 0 : err + 33];
 }
 
 /// ditto
 void optimize(alias f, TaskPool, T)(
-    scope ref LeastSquaresLM!T lm,
+    scope ref LeastSquares!T lm,
     size_t m,
     Slice!(T*) x,
     Slice!(const(T)*) l,
@@ -235,7 +236,7 @@ void optimize(alias f, TaskPool, T)(
         }
     };
     if (auto err = optimizeImpl!(f, null, tm, T)(lm, m, x, l, u))
-        throw leastSquaresLMExceptions[err == 1 ? 0 : err + 33];
+        throw leastSquaresExceptions[err == 1 ? 0 : err + 33];
 }
 
 /// With Jacobian
@@ -246,7 +247,7 @@ version(mir_optim_test)
     import mir.ndslice.slice: sliced;
     import mir.blas: nrm2;
 
-    LeastSquaresLM!double lm;
+    LeastSquares!double lm;
     auto x = [100.0, 100].sliced;
     auto l = x.shape.slice(-double.infinity);
     auto u = x.shape.slice(+double.infinity);
@@ -277,7 +278,7 @@ unittest
     import mir.blas: nrm2;
     import std.parallelism: taskPool;
 
-    LeastSquaresLM!double lm;
+    LeastSquares!double lm;
     auto x = [-1.2, 1].sliced;
     auto l = x.shape.slice(-double.infinity);
     auto u = x.shape.slice(+double.infinity);
@@ -305,7 +306,7 @@ version(mir_optim_test)
     import mir.ndslice.slice: sliced;
     import mir.blas: nrm2;
 
-    LeastSquaresLM!double lm;
+    LeastSquares!double lm;
     auto x = [-1.2, 1].sliced;
     auto l = x.shape.slice(-double.infinity);
     auto u = x.shape.slice(+double.infinity);
@@ -380,7 +381,7 @@ version(mir_optim_test)
     auto l = x.shape.slice(-double.infinity);
     auto u = x.shape.slice(+double.infinity);
 
-    LeastSquaresLM!double lm;
+    LeastSquares!double lm;
     lm.optimize!((p, y) => y[] = model(xdata, p) - ydata)(ydata.length, x, l, u);
 
     assert((x - [1.0, 2.0].sliced).slice.nrm2 < 0.05);
@@ -405,7 +406,7 @@ version(mir_optim_test)
     auto rng = Random(12345);
     auto ydata = slice(model(xdata, [10.0, 10.0, 10.0]) + 0.1 * rng.randomSlice(normalVar, xdata.shape));
 
-    LeastSquaresLM!double lm;
+    LeastSquares!double lm;
 
     auto x = [15.0, 15.0, 15.0].sliced;
     auto l = [5.0, 11.0, 5.0].sliced;
@@ -443,7 +444,7 @@ version(mir_optim_test)
     import mir.ndslice.allocation: slice;
     import mir.ndslice.slice: sliced;
 
-    LeastSquaresLM!double lm;
+    LeastSquares!double lm;
     auto x = [0.001, 0.0001].sliced;
     auto l = [-0.5, -0.5].sliced;
     auto u = [0.5, 0.5].sliced;
@@ -477,7 +478,7 @@ Params:
 See_also: $(LREF optimize)
 +/
 LMStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
-    scope ref LeastSquaresLM!T lm,
+    scope ref LeastSquares!T lm,
     size_t m,
     Slice!(T*) x,
     Slice!(const(T)*) l,
@@ -493,7 +494,7 @@ LMStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
         fInst(x, x);
     }
     static if (is(typeof(g) == typeof(null)))
-        enum LeastSquaresLM!T.Jacobian gInst = null;
+        enum LeastSquares!T.Jacobian gInst = null;
     else
     {
         auto gInst = delegate(Slice!(const(T)*) x, Slice!(T*, 2) J)
@@ -520,15 +521,20 @@ LMStatus optimizeImpl(alias f, alias g = null, alias tm = null, T)(
         {
             tm(count, task);
         };
-        // auto tmInst = &tmInstDec;
         static if (isNullableFunction!(tm))
             if (!tm)
                 tmInst = null;
         if (false) with(lm)
             tmInst(0, null);
     }
-    alias TM = typeof(tmInst);
-    return optimizeLeastSquaresLM!T(lm, m, x, l, u, fInst.trustedAllAttr, gInst.trustedAllAttr,  tmInst.trustedAllAttr);
+
+    auto n = x.length;
+    import mir.ndslice.allocation: rcslice;
+    auto work = rcslice!T(mir_least_squares_work_length(m, n));
+    auto iwork = rcslice!lapackint(mir_least_sqaures_iwork_length(m, n));
+    auto workS = work.lightScope;
+    auto iworkS = iwork.lightScope;
+    return optimizeLeastSquares!T(lm, m, x, l, u, workS, iworkS, fInst.trustedAllAttr, gInst.trustedAllAttr, tmInst.trustedAllAttr);
 }
 
 /++
@@ -593,50 +599,54 @@ Params:
     tm = thread manager for finite difference jacobian approximation in case of g is null (optional)
 +/
 pragma(inline, false)
-LMStatus optimizeLeastSquaresLMD
+LMStatus optimizeLeastSquaresD
     (
-        scope ref LeastSquaresLM!double lm,
+        scope ref LeastSquares!double lm,
         size_t m,
         Slice!(double*) x,
         Slice!(const(double)*) l,
         Slice!(const(double)*) u,
-        scope LeastSquaresLM!double.Function f,
-        scope LeastSquaresLM!double.Jacobian g = null,
+        Slice!(double*) work,
+        Slice!(lapackint*) iwork,
+        scope LeastSquares!double.Function f,
+        scope LeastSquares!double.Jacobian g = null,
         scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
-    return optimizeLMImplGeneric!double(lm, m, x, l, u, f, g, tm);
+    return optimizeLeastSquaresImplGeneric!double(lm, m, x, l, u, work, iwork, f, g, tm);
 }
 
 
 /// ditto
 pragma(inline, false)
-LMStatus optimizeLeastSquaresLMS
+LMStatus optimizeLeastSquaresS
     (
-        scope ref LeastSquaresLM!float lm,
+        scope ref LeastSquares!float lm,
         size_t m,
         Slice!(float*) x,
         Slice!(const(float)*) l,
         Slice!(const(float)*) u,
-        scope LeastSquaresLM!float.Function f,
-        scope LeastSquaresLM!float.Jacobian g = null,
+        Slice!(float*) work,
+        Slice!(lapackint*) iwork,
+        scope LeastSquares!float.Function f,
+        scope LeastSquares!float.Jacobian g = null,
         scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
-    return optimizeLMImplGeneric!float(lm, 2, x, l, u, f, g, tm);
+    return optimizeLeastSquaresImplGeneric!float(lm, 2, x, l, u, work, iwork, f, g, tm);
 }
 
 /// ditto
-alias optimizeLeastSquaresLM(T : double) = optimizeLeastSquaresLMD;
+alias optimizeLeastSquares(T : double) = optimizeLeastSquaresD;
 /// ditto
-alias optimizeLeastSquaresLM(T : float) = optimizeLeastSquaresLMS;
+alias optimizeLeastSquares(T : float) = optimizeLeastSquaresS;
 
 extern(C) @safe nothrow @nogc
 {
     /++
     +/
     @safe pure nothrow @nogc
-    size_t mir_box_lm_work_length(size_t m, size_t n)
+    size_t mir_least_squares_work_length(size_t m, size_t n)
     {
         import mir.optim.boxcqp: mir_box_qp_work_length;
         return mir_box_qp_work_length(n) + n * 5 + n * n + n * m + m * 2;
@@ -645,7 +655,7 @@ extern(C) @safe nothrow @nogc
     /++
     +/
     @safe pure nothrow @nogc
-    size_t mir_box_lm_iwork_length(size_t m, size_t n)
+    size_t mir_least_sqaures_iwork_length(size_t m, size_t n)
     {
         import mir.utility: max;
         import mir.optim.boxcqp: mir_box_qp_iwork_length;
@@ -660,7 +670,7 @@ extern(C) @safe nothrow @nogc
     +/
     extern(C)
     pragma(inline, false)
-    immutable(char)* mir_least_squares_lm_status_string(LMStatus st) @trusted pure nothrow @nogc
+    immutable(char)* mir_least_squares_status_string(LMStatus st) @trusted pure nothrow @nogc
     {
         return st.lmStatusString.ptr;
     }
@@ -686,124 +696,133 @@ extern(C) @safe nothrow @nogc
     +/
     extern(C)
     pragma(inline, false)
-    LMStatus mir_least_squares_lm_optimize_d
+    LMStatus mir_optimize_least_squares_d
         (
-            scope ref LeastSquaresLM!double lm,
+            scope ref LeastSquares!double lm,
             uint m,
             uint n,
             double* x,
             const(double)* l,
             const(double)* u,
+            Slice!(double*) work,
+            Slice!(lapackint*) iwork,
             scope void* fContext,
-            scope LeastSquaresLM!double.FunctionBetterC f,
+            scope LeastSquares!double.FunctionBetterC f,
             scope void* gContext = null,
-            scope LeastSquaresLM!double.JacobianBetterC g = null,
+            scope LeastSquares!double.JacobianBetterC g = null,
             scope void* tmContext = null,
             scope LeastSquaresThreadManagerBetterC tm = null,
         ) @system nothrow @nogc pure
     {
-        return optimizeLMImplGenericBetterC!double(lm, m, n, x, l, u, fContext, f, gContext, g, tmContext, tm);
+        return optimizeLeastSquaresImplGenericBetterC!double(lm, m, n, x, l, u, work, iwork, fContext, f, gContext, g, tmContext, tm);
     }
 
     /// ditto
     extern(C)
     pragma(inline, false)
-    LMStatus mir_least_squares_lm_optimize_s
+    LMStatus mir_optimize_least_squares_s
         (
-            scope ref LeastSquaresLM!float lm,
+            scope ref LeastSquares!float lm,
             uint m,
             uint n,
             float* x,
             const(float)* l,
             const(float)* u,
+            Slice!(float*) work,
+            Slice!(lapackint*) iwork,
             scope void* fContext,
-            scope LeastSquaresLM!float.FunctionBetterC f,
+            scope LeastSquares!float.FunctionBetterC f,
             scope void* gContext = null,
-            scope LeastSquaresLM!float.JacobianBetterC g = null,
+            scope LeastSquares!float.JacobianBetterC g = null,
             scope void* tmContext = null,
             scope LeastSquaresThreadManagerBetterC tm = null,
         ) @system nothrow @nogc pure
     {
-        return optimizeLMImplGenericBetterC!float(lm, m, n, x, l, u, fContext, f, gContext, g, tmContext, tm);
+        return optimizeLeastSquaresImplGenericBetterC!float(lm, m, n, x, l, u, work, iwork, fContext, f, gContext, g, tmContext, tm);
     }
 
     /// ditto
-    alias mir_least_squares_lm_optimize(T : double) = mir_least_squares_lm_optimize_d;
+    alias mir_optimize_least_squares(T : double) = mir_optimize_least_squares_d;
 
     /// ditto
-    alias mir_least_squares_lm_optimize(T : float) = mir_least_squares_lm_optimize_s;
+    alias mir_optimize_least_squares(T : float) = mir_optimize_least_squares_s;
 
     /++
     Initialize LM data structure with default params for iteration.
     Params:
         lm = Levenberg-Marquart data structure
     +/
-    void mir_least_squares_lm_init_d(ref LeastSquaresLM!double lm) pure
+    void mir_least_squares_init_d(ref LeastSquares!double lm) pure
     {
         lm = lm.init;
     }
 
     /// ditto
-    void mir_least_squares_lm_init_s(ref LeastSquaresLM!float lm) pure
+    void mir_least_squares_init_s(ref LeastSquares!float lm) pure
     {
         lm = lm.init;
     }
 
     /// ditto
-    alias mir_least_squares_lm_init(T : double) = mir_least_squares_lm_init_d;
+    alias mir_least_squares_init(T : double) = mir_least_squares_init_d;
 
     /// ditto
-    alias mir_least_squares_lm_init(T : float) = mir_least_squares_lm_init_s;
+    alias mir_least_squares_init(T : float) = mir_least_squares_init_s;
 
     /++
     Resets all counters and flags, fills `x`, `y`, `upper`, `lower`, vecors with default values.
     Params:
         lm = Levenberg-Marquart data structure
     +/
-    void mir_least_squares_lm_reset_d(ref LeastSquaresLM!double lm) pure
+    void mir_least_squares_reset_d(ref LeastSquares!double lm) pure
     {
         lm.reset;
     }
 
     /// ditto
-    void mir_least_squares_lm_reset_s(ref LeastSquaresLM!float lm) pure
+    void mir_least_squares_reset_s(ref LeastSquares!float lm) pure
     {
         lm.reset;
     }
 
     /// ditto
-    alias mir_least_squares_lm_reset(T : double) = mir_least_squares_lm_reset_d;
+    alias mir_least_squares_reset(T : double) = mir_least_squares_reset_d;
 
     /// ditto
-    alias mir_least_squares_lm_reset(T : float) = mir_least_squares_lm_reset_s;
+    alias mir_least_squares_reset(T : float) = mir_least_squares_reset_s;
 }
 
 private:
 
-LMStatus optimizeLMImplGenericBetterC(T)
+LMStatus optimizeLeastSquaresImplGenericBetterC(T)
     (
-        scope ref LeastSquaresLM!T lm,
+        scope ref LeastSquares!T lm,
         uint m,
         uint n,
         T* x,
         const(T)* l,
         const(T)* u,
+        Slice!(T*) work,
+        Slice!(lapackint*) iwork,
         scope void* fContext,
-        scope LeastSquaresLM!T.FunctionBetterC f,
+        scope LeastSquares!T.FunctionBetterC f,
         scope void* gContext,
-        scope LeastSquaresLM!T.JacobianBetterC g,
+        scope LeastSquares!T.JacobianBetterC g,
         scope void* tmContext,
         scope LeastSquaresThreadManagerBetterC tm,
     ) @system nothrow @nogc pure
 {
     version(LDC) pragma(inline, true);
+
     if (g)
-        return optimizeLeastSquaresLM!T(
+        return optimizeLeastSquares!T(
             lm,
             m,
             x[0 .. n].sliced,
             l[0 .. n].sliced,
             u[0 .. n].sliced,
+            work,
+            iwork,
             (x, y) @trusted => f(fContext, y.length, x.length, x.iterator, y.iterator),
             (x, J) @trusted => g(gContext, J.length, x.length, x.iterator, J.iterator),
             null
@@ -815,22 +834,26 @@ LMStatus optimizeLMImplGenericBetterC(T)
     };
 
     if (tm)
-        return optimizeLeastSquaresLM!T(
+        return optimizeLeastSquares!T(
             lm,
             m,
             x[0 .. n].sliced,
             l[0 .. n].sliced,
             u[0 .. n].sliced,
+            work,
+            iwork,
             (x, y) @trusted => f(fContext, y.length, x.length, x.iterator, y.iterator),
             null,
             (count, scope LeastSquaresTask task) @trusted => tm(tmContext, count, task, taskFunction)
         );
-    return optimizeLeastSquaresLM!T(
+    return optimizeLeastSquares!T(
         lm,
         m,
         x[0 .. n].sliced,
         l[0 .. n].sliced,
         u[0 .. n].sliced,
+        work,
+        iwork,
         (x, y) @trusted => f(fContext, y.length, x.length, x.iterator, y.iterator),
         null,
         null
@@ -845,15 +868,17 @@ if (isFunctionPointer!T || isDelegate!T)
 }
 
 // LM algorithm
-LMStatus optimizeLMImplGeneric(T)
+LMStatus optimizeLeastSquaresImplGeneric(T)
     (
-        scope ref LeastSquaresLM!T lm,
+        scope ref LeastSquares!T lm,
         size_t m,
         Slice!(T*) x,
         Slice!(const(T)*) lower,
         Slice!(const(T)*) upper,
-        scope LeastSquaresLM!T.Function f,
-        scope LeastSquaresLM!T.Jacobian g,
+        Slice!(T*) work,
+        Slice!(lapackint*) iwork,
+        scope LeastSquares!T.Function f,
+        scope LeastSquares!T.Jacobian g,
         scope LeastSquaresThreadManager tm,
     ) @trusted nothrow @nogc pure
 {with(lm){
@@ -874,9 +899,9 @@ LMStatus optimizeLMImplGeneric(T)
 
     uint n = cast(uint)x.length;
 
-    auto workData = assumePure(&stdcUninitSlice!(T, 1))([mir_box_lm_work_length(m, n)]);
+    // auto workData = assumePure(&stdcUninitSlice!(T, 1))([mir_least_squares_work_length(m, n)]);
 
-    auto work = workData;
+    // auto work = workData;
 
     auto deltaX = work[0 .. n]; work = work[n .. $];
     auto Jy = work[0 .. n]; work = work[n .. $];
@@ -893,14 +918,14 @@ LMStatus optimizeLMImplGeneric(T)
 
     auto qpwork = work;
 
-    auto iwork = assumePure(&stdcUninitSlice!(lapackint, 1))(mir_box_lm_work_length(m, n));
+    // auto iwork = assumePure(&stdcUninitSlice!(lapackint, 1))(mir_least_sqaures_iwork_length(m, n));
 
-    scope (exit)
-    {
-        import mir.internal.memory;
-        iwork.ptr.free;
-        workData.ptr.free;
-    }
+    // scope (exit)
+    // {
+    //     import mir.internal.memory;
+    //     iwork.ptr.free;
+    //     workData.ptr.free;
+    // }
 
     version(LDC) pragma(inline, true);
 

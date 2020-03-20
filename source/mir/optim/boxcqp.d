@@ -94,12 +94,10 @@ BoxQPStatus solveBoxQP(T)(
     import mir.ndslice.allocation: rcslice;
     auto n = q.length;
     auto work = rcslice!T(mir_box_qp_work_length(n));
-    auto bwork = rcslice!byte(n);
-    auto iwork = rcslice!lapackint(n);
+    auto iwork = rcslice!lapackint(mir_box_qp_iwork_length(n));
     auto workS = work.lightScope;
     auto iworkS = iwork.lightScope;
-    auto bworkS = bwork.lightScope;
-    return solveBoxQP(settings, P, q, l, u, x, false, workS, iworkS, bworkS);
+    return solveBoxQP(settings, P, q, l, u, x, false, workS, iworkS, true);
 }
 
 /++
