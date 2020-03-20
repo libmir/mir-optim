@@ -865,11 +865,8 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
     import core.stdc.stdio;
 
     uint n = cast(uint)x.length;
-
-    // auto workData = assumePure(&stdcUninitSlice!(T, 1))([mir_least_squares_work_length(m, n)]);
-
-    // auto work = workData;
-
+    work[] = 0;
+    iwork[] = 0;
     auto deltaX = work[0 .. n]; work = work[n .. $];
     auto Jy = work[0 .. n]; work = work[n .. $];
     auto nBuffer = work[0 .. n]; work = work[n .. $];
@@ -884,15 +881,6 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
     auto qpu = work[0 .. n]; work = work[n .. $];
 
     auto qpwork = work;
-
-    // auto iwork = assumePure(&stdcUninitSlice!(lapackint, 1))(mir_least_sqaures_iwork_length(m, n));
-
-    // scope (exit)
-    // {
-    //     import mir.internal.memory;
-    //     iwork.ptr.free;
-    //     workData.ptr.free;
-    // }
 
     version(LDC) pragma(inline, true);
 
@@ -930,7 +918,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
 
     int badPredictions;
 
-    // import core.stdc.stdio;
+    import core.stdc.stdio;
 
     lambda = 0;
     iterCt = 0;
@@ -949,7 +937,10 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
             mu = 1;
         }
         if (!allLessOrEqual(x, x))
-            { status = LeastSquaresStatus.numericError; return ret; }
+        {
+            cast(void) assumePure(&printf)("\n@@@@\nX != X\n@@@@\n");
+            status = LeastSquaresStatus.numericError; return ret;
+        }
         if (needJacobian)
         {
             needJacobian = false;
@@ -1039,6 +1030,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
         JJ.diagonal[] += lambda;
         if (qpSettings.solveBoxQP(JJ.canonical, Jy, qpl, qpu, deltaX, false, qpwork, iwork, false) != BoxQPStatus.solved)
         {
+            cast(void) assumePure(&printf)("\n@@@@\n error in solveBoxQP\n@@@@\n");
             { status = LeastSquaresStatus.numericError; return ret; }
         }
 
@@ -1056,8 +1048,11 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
 
         auto trialResidual = dot(mBuffer, mBuffer);
 
-        if (!(trialResidual.fabs <= T.max))
+        if (!(trialResidual <= T.infinity))
+        {
+            cast(void) assumePure(&printf)("\n@@@@\n trialResidual = %e\n@@@@\n", trialResidual);
             { status = LeastSquaresStatus.numericError; return ret; }
+        }
 
         auto improvement = residual - trialResidual;
         if (!(improvement > 0))
