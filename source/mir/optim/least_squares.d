@@ -631,9 +631,27 @@ alias optimizeLeastSquaresLM(T : double) = optimizeLeastSquaresLMD;
 /// ditto
 alias optimizeLeastSquaresLM(T : float) = optimizeLeastSquaresLMS;
 
-
 extern(C) @safe nothrow @nogc
 {
+    /++
+    +/
+    @safe pure nothrow @nogc
+    size_t mir_box_lm_work_length(size_t m, size_t n)
+    {
+        import mir.optim.boxcqp: mir_box_qp_work_length;
+        return mir_box_qp_work_length(n) + n * 5 + n * n + n * m + m * 2;
+    }
+
+    /++
+    +/
+    @safe pure nothrow @nogc
+    size_t mir_box_lm_iwork_length(size_t m, size_t n)
+    {
+        import mir.utility: max;
+        import mir.optim.boxcqp: mir_box_qp_iwork_length;
+        return max(mir_box_qp_iwork_length(n), n);
+    }
+
     /++
     Status string for extern(C) API.
     Params:
@@ -856,12 +874,10 @@ LMStatus optimizeLMImplGeneric(T)
 
     uint n = cast(uint)x.length;
 
-    auto workData = assumePure(&stdcUninitSlice!(T, 1))([boxQPWorkLength(n) + n * 5 + n * n + n * m + m * 2]);
+    auto workData = assumePure(&stdcUninitSlice!(T, 1))([mir_box_lm_work_length(m, n)]);
 
     auto work = workData;
 
-    auto qpl = work[0 .. n]; work = work[n .. $];
-    auto qpu = work[0 .. n]; work = work[n .. $];
     auto deltaX = work[0 .. n]; work = work[n .. $];
     auto Jy = work[0 .. n]; work = work[n .. $];
     auto nBuffer = work[0 .. n]; work = work[n .. $];
@@ -869,12 +885,15 @@ LMStatus optimizeLMImplGeneric(T)
     auto JJ = work[0 .. n * n].sliced(n, n); work = work[n * n .. $];
     auto J = work[0 .. m * n].sliced(m, n); work = work[m * n .. $];
 
-    auto mBuffer = work[0 .. m]; work = work[m .. $];
     auto y = work[0 .. m]; work = work[m .. $];
+    auto mBuffer = work[0 .. m]; work = work[m .. $];
+
+    auto qpl = work[0 .. n]; work = work[n .. $];
+    auto qpu = work[0 .. n]; work = work[n .. $];
 
     auto qpwork = work;
 
-    auto iwork = assumePure(&stdcUninitSlice!(lapackint, 1))(boxQPIWorkLength(n).max(n));
+    auto iwork = assumePure(&stdcUninitSlice!(lapackint, 1))(mir_box_lm_work_length(m, n));
 
     scope (exit)
     {

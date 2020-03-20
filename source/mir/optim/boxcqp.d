@@ -30,20 +30,23 @@ enum BoxQPStatus
     maxIterations,
 }
 
-/++
-+/
-@safe pure nothrow @nogc
-size_t boxQPWorkLength(size_t n)
+extern(C) @safe nothrow @nogc
 {
-    return n * n + n * 8;
-}
+    /++
+    +/
+    @safe pure nothrow @nogc
+    size_t mir_box_qp_work_length(size_t n)
+    {
+        return n * n + n * 8;
+    }
 
-/++
-+/
-@safe pure nothrow @nogc
-size_t boxQPIWorkLength(size_t n)
-{
-    return n + (n / lapackint.sizeof + (n % lapackint.sizeof != 0));
+    /++
+    +/
+    @safe pure nothrow @nogc
+    size_t mir_box_qp_iwork_length(size_t n)
+    {
+        return n + (n / lapackint.sizeof + (n % lapackint.sizeof != 0));
+    }
 }
 
 /++
@@ -90,7 +93,7 @@ BoxQPStatus solveBoxQP(T)(
 {
     import mir.ndslice.allocation: rcslice;
     auto n = q.length;
-    auto work = rcslice!T(boxQPWorkLength(n));
+    auto work = rcslice!T(mir_box_qp_work_length(n));
     auto bwork = rcslice!byte(n);
     auto iwork = rcslice!lapackint(n);
     auto workS = work.lightScope;
@@ -112,8 +115,8 @@ Params:
     u = Upper bounds in (-inf, +inf], N
     x = solutoin, N
     unconstrainedSolution = 
-    work = workspace, boxQPWorkLength(N)
-    iwork = integer workspace, boxQPIWorkLength(N)
+    work = workspace, $(LREF mir_box_qp_work_length)(N)
+    iwork = integer workspace, $(LREF mir_box_qp_iwork_length)(N)
     restoreUpperP = (optional) restore upper triangular part of P
 +/
 @safe pure nothrow @nogc
@@ -138,8 +141,8 @@ in {
     assert(l.length == n);
     assert(u.length == n);
     assert(x.length == n);
-    assert(work.length >= boxQPWorkLength(n));
-    assert(iwork.length >= boxQPIWorkLength(n));
+    assert(work.length >= mir_box_qp_work_length(n));
+    assert(iwork.length >= mir_box_qp_iwork_length(n));
 }
 do {
     import mir.algorithm.iteration: eachUploPair;
