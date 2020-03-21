@@ -878,9 +878,14 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
     import mir.algorithm.iteration;
     import core.stdc.stdio;
 
-    uint n = cast(uint)x.length;
-    work[] = 0;
-    iwork[] = 0;
+    debug
+    {
+        work[] = 0;
+        iwork[] = 0;
+    }
+
+    auto n = cast(uint)x.length;
+
     auto deltaX = work[0 .. n]; work = work[n .. $];
     auto Jy = work[0 .. n]; work = work[n .. $];
     auto nBuffer = work[0 .. n]; work = work[n .. $];
