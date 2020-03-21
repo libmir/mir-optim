@@ -80,31 +80,37 @@ configuration "zerolib" {
 }
 
 configuration "unittest-openblas" {
+    versions "mir_optim_test"
 	dependency "mir-random" version=">=1.0.0-beta"
 	subConfiguration "mir-lapack" "openblas"
 }
 
 configuration "unittest-threelib" {
+    versions "mir_optim_test"
 	dependency "mir-random" version=">=1.0.0-beta"
 	subConfiguration "mir-lapack" "threelib"
 }
 
 configuration "unittest-cblas" {
+    versions "mir_optim_test"
 	dependency "mir-random" version=">=1.0.0-beta"
 	subConfiguration "mir-lapack" "cblas"
 }
 
 configuration "unittest-blas" {
+    versions "mir_optim_test"
 	dependency "mir-random" version=">=1.0.0-beta"
 	subConfiguration "mir-lapack" "blas"
 }
 
 configuration "unittest-lapack" {
+    versions "mir_optim_test"
 	dependency "mir-random" version=">=1.0.0-beta"
 	subConfiguration "mir-lapack" "lapack"
 }
 
 configuration "unittest-mkl-sequential" {
+    versions "mir_optim_test"
 	dependency "mir-random" version=">=1.0.0-beta"
 	subConfiguration "mir-lapack" "mkl-sequential"
 }

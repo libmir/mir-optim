@@ -377,7 +377,7 @@ unittest
     auto u = [100.0, 2, 1].sliced;
     auto x = slice!double(q.length);
 
-    solveQP(P, q, l, u, x);
+    solveBoxQP(P, q, l, u, x);
     assert(x == [-0.5, 2, 1]);
 }
 

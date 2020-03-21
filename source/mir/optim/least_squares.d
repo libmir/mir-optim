@@ -15,10 +15,6 @@ import std.meta;
 import std.traits;
 import lapack: lapackint;
 
-public import std.typecons: Flag, Yes, No;
-
-version = mir_optim_test;
-
 /++
 +/
 enum LeastSquaresStatus
@@ -845,12 +841,12 @@ LeastSquaresResult!T optimizeLeastSquaresImplGenericBetterC(T)
     );
 }
 
-private auto assumePure(T)(T t)
-if (isFunctionPointer!T || isDelegate!T)
-{
-    enum attrs = functionAttributes!T | FunctionAttribute.pure_;
-    return cast(SetFunctionAttributes!(T, functionLinkage!T, attrs)) t;
-}
+// private auto assumePure(T)(T t)
+// if (isFunctionPointer!T || isDelegate!T)
+// {
+//     enum attrs = functionAttributes!T | FunctionAttribute.pure_;
+//     return cast(SetFunctionAttributes!(T, functionLinkage!T, attrs)) t;
+// }
 
 // LM algorithm
 LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
@@ -964,7 +960,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
         }
         if (!allLessOrEqual(x, x))
         {
-            cast(void) assumePure(&printf)("\n@@@@\nX != X\n@@@@\n");
+            // cast(void) assumePure(&printf)("\n@@@@\nX != X\n@@@@\n");
             status = LeastSquaresStatus.numericError;
             break;
         }
@@ -1054,14 +1050,14 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
         JJ.diagonal[] += lambda;
         if (qpSettings.solveBoxQP(JJ.canonical, Jy, qpl, qpu, deltaX, false, qpwork, iwork, false) != BoxQPStatus.solved)
         {
-            cast(void) assumePure(&printf)("\n@@@@\n error in solveBoxQP\n@@@@\n");
+            // cast(void) assumePure(&printf)("\n@@@@\n error in solveBoxQP\n@@@@\n");
             status = LeastSquaresStatus.numericError;
             break;
         }
 
         if (!allLessOrEqual(deltaX, deltaX))
         {
-            cast(void) assumePure(&printf)("\n@@@@\ndX != dX\n@@@@\n");
+            // cast(void) assumePure(&printf)("\n@@@@\ndX != dX\n@@@@\n");
             status = LeastSquaresStatus.numericError;
             break;
         }
@@ -1091,7 +1087,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
 
         if (!(trialResidual <= T.infinity))
         {
-            cast(void) assumePure(&printf)("\n@@@@\n trialResidual = %e\n@@@@\n", trialResidual);
+            // cast(void) assumePure(&printf)("\n@@@@\n trialResidual = %e\n@@@@\n", trialResidual);
             status = LeastSquaresStatus.numericError;
             break;
         }
