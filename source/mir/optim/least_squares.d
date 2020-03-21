@@ -19,13 +19,20 @@ public import std.typecons: Flag, Yes, No;
 
 version = mir_optim_test;
 
-///
+/++
++/
 enum LeastSquaresStatus
 {
-    ///
-    success = 0,
-    ///
-    initialized,
+    /// Maximum number of iterations reached
+    maxIterations = -1,
+    /// The algorithm cann't improve the solution
+    furtherImprovement,
+    /// Stationary values
+    xConverged,
+    /// Stationary gradient
+    gConverged,
+    /// Good (small) residual
+    fConverged,
     ///
     badBounds = -32,
     ///
@@ -47,16 +54,15 @@ version(D_Exceptions)
     /+
     Exception for $(LREF optimize).
     +/
-    private static immutable leastSquaresException_initialized = new Exception("mir-optim LM-algorithm: status is 'initialized', zero iterations");
-    private static immutable leastSquaresException_badBounds = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badBounds.leastSquaresStatusString);
-    private static immutable leastSquaresException_badGuess = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badGuess.leastSquaresStatusString);
-    private static immutable leastSquaresException_badMinStepQuality = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badMinStepQuality.leastSquaresStatusString);
-    private static immutable leastSquaresException_badGoodStepQuality = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badGoodStepQuality.leastSquaresStatusString);
-    private static immutable leastSquaresException_badStepQuality = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badStepQuality.leastSquaresStatusString);
-    private static immutable leastSquaresException_badLambdaParams = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.badLambdaParams.leastSquaresStatusString);
-    private static immutable leastSquaresException_numericError = new Exception("mir-optim LM-algorithm: " ~ LeastSquaresStatus.numericError.leastSquaresStatusString);
+    private static immutable leastSquaresException_maxIterations = new Exception("mir-optim Least Squares: " ~ LeastSquaresStatus.maxIterations.leastSquaresStatusString);
+    private static immutable leastSquaresException_badBounds = new Exception("mir-optim Least Squares: " ~ LeastSquaresStatus.badBounds.leastSquaresStatusString);
+    private static immutable leastSquaresException_badGuess = new Exception("mir-optim Least Squares: " ~ LeastSquaresStatus.badGuess.leastSquaresStatusString);
+    private static immutable leastSquaresException_badMinStepQuality = new Exception("mir-optim Least Squares: " ~ LeastSquaresStatus.badMinStepQuality.leastSquaresStatusString);
+    private static immutable leastSquaresException_badGoodStepQuality = new Exception("mir-optim Least Squares: " ~ LeastSquaresStatus.badGoodStepQuality.leastSquaresStatusString);
+    private static immutable leastSquaresException_badStepQuality = new Exception("mir-optim Least Squares: " ~ LeastSquaresStatus.badStepQuality.leastSquaresStatusString);
+    private static immutable leastSquaresException_badLambdaParams = new Exception("mir-optim Least Squares: " ~ LeastSquaresStatus.badLambdaParams.leastSquaresStatusString);
+    private static immutable leastSquaresException_numericError = new Exception("mir-optim Least Squares: " ~ LeastSquaresStatus.numericError.leastSquaresStatusString);
     private static immutable leastSquaresExceptions = [
-        leastSquaresException_initialized,
         leastSquaresException_badBounds,
         leastSquaresException_badGuess,
         leastSquaresException_badMinStepQuality,
@@ -88,30 +94,34 @@ struct LeastSquaresSettings(T)
     import mir.math.constant: GoldenRatio;
     import lapack: lapackint;
 
-    /// maximum number of iterations
-    uint maxIter = 1000;
-    /// Maximum jacobian model age
+    /// Maximum number of iterations
+    uint maxIterations = 1000;
+    /// Maximum jacobian model age (0 for default selection)
     uint maxAge;
-    /// tolerance in x
-    T tolX = T.epsilon;
-    /// tolerance in gradient
-    T tolG = T.epsilon;
-    /// the algorithm stops iteration when the residual value is less or equal to `maxGoodResidual`.
+    /// epsilon for finite difference Jacobian approximation
+    T jacobianEpsilon = T(2) ^^ ((1 - T.mant_dig) / 2);
+    /// Absolute tolerance for step size, L2 norm
+    T absTolerance = T.epsilon;
+    /// Relative tolerance for step size, L2 norm
+    T relTolerance = 0;
+    /// Absolute tolerance for gradient, L-inf norm
+    T gradTolerance = T.epsilon;
+    /// The algorithm stops iteration when the residual value is less or equal to `maxGoodResidual`.
     T maxGoodResidual = T.epsilon ^^ 2;
-    /// `lambda` is multiplied by this factor after step below min quality
-    T lambdaIncrease = 2;
-    /// `lambda` is multiplied by this factor after good quality steps
-    T lambdaDecrease = 1 / (GoldenRatio * 2);
-    /// for steps below this quality, the trust region is shrinked
-    T minStepQuality = 0.1;
-    /// for steps above this quality, the trust region is expanded
-    T goodStepQuality = 0.5;
+    /// maximum norm of iteration step
+    T maxStep = T.max.sqrt / 16;
     /// minimum trust region radius
     T maxLambda = T.max / 16;
     /// maximum trust region radius
     T minLambda = T.min_normal * 16;
-    /// epsilon for finite difference Jacobian approximation
-    T jacobianEpsilon = T(2) ^^ ((1 - T.mant_dig) / 2);
+    /// for steps below this quality, the trust region is shrinked
+    T minStepQuality = 0.1;
+    /// for steps above this quality, the trust region is expanded
+    T goodStepQuality = 0.5;
+    /// `lambda` is multiplied by this factor after step below min quality
+    T lambdaIncrease = 2;
+    /// `lambda` is multiplied by this factor after good quality steps
+    T lambdaDecrease = 1 / (GoldenRatio * 2);
     /// Bound constrained convex quadratic problem settings
     BoxQPSettings!T qpSettings;
 }
@@ -122,27 +132,18 @@ Least-Squares results.
 struct LeastSquaresResult(T)
     if (is(T == double) || is(T == float))
 {
-    /++
-    Counters and state values.
-    +/
-    uint iterCt;
-    /// ditto
+    /// Computation status
+    LeastSquaresStatus status = LeastSquaresStatus.numericError;
+    /// Successful step count
+    uint iterations;
+    /// Number of the function calls
     uint fCalls;
-    /// ditto
+    /// Number of the Jacobian calls
     uint gCalls;
-    /// ditto
+    /// Final residual
     T residual = T.infinity;
-    /// (inverse of) initial trust region radius
+    /// LMA variable for (inverse of) initial trust region radius
     T lambda = 0;
-    /// ditto
-    LeastSquaresStatus status = LeastSquaresStatus.initialized;
-    /// ditto
-    bool xConverged;
-    /// ditto
-    bool gConverged;
-    /// ditto
-    /// `residual <= maxGoodResidual`
-    bool fConverged;
 }
 
 /++
@@ -163,9 +164,9 @@ Params:
     tm = thread manager for finite difference jacobian approximation in case of g is null (optional)
     settings = Levenberg-Marquardt data structure
     taskPool = task Pool with `.parallel` method for finite difference jacobian approximation in case of g is null (optional)
-See_also: $(LREF optimizeImpl)
+See_also: $(LREF optimizeLeastSquares)
 +/
-void optimize(alias f, alias g = null, alias tm = null, T)(
+LeastSquaresResult!T optimize(alias f, alias g = null, alias tm = null, T)(
     scope ref LeastSquaresSettings!T settings,
     size_t m,
     Slice!(T*) x,
@@ -174,12 +175,17 @@ void optimize(alias f, alias g = null, alias tm = null, T)(
 )
     if ((is(T == float) || is(T == double)))
 {
-    if (auto err = optimizeImpl!(f, g, tm, T)(settings, m, x, l, u).status)
-        throw leastSquaresExceptions[err == 1 ? 0 : err + 33];
+    auto ret = optimizeLeastSquares!(f, g, tm, T)(settings, m, x, l, u);
+    if (ret.status == -1)
+        throw leastSquaresException_maxIterations;
+    else
+    if (ret.status < -1)
+        throw leastSquaresExceptions[ret.status + 32];
+    return ret;
 }
 
 /// ditto
-void optimize(alias f, TaskPool, T)(
+LeastSquaresResult!T optimize(alias f, TaskPool, T)(
     scope ref LeastSquaresSettings!T settings,
     size_t m,
     Slice!(T*) x,
@@ -202,8 +208,14 @@ void optimize(alias f, TaskPool, T)(
                 task(1, 0, i);
         }
     };
-    if (auto err = optimizeImpl!(f, null, tm, T)(settings, m, x, l, u).status)
-        throw leastSquaresExceptions[err == 1 ? 0 : err + 33];
+
+    auto ret = optimizeLeastSquares!(f, null, tm, T)(settings, m, x, l, u);
+    if (ret.status == -1)
+        throw leastSquaresException_maxIterations;
+    else
+    if (ret.status < -1)
+        throw leastSquaresExceptions[ret.status + 32];
+    return ret;
 }
 
 /// With Jacobian
@@ -304,7 +316,7 @@ version(mir_optim_test)
 
     // import std.stdio;
 
-    // writeln(settings.iterCt, " ", settings.fCalls, " ", settings.gCalls, " x = ", x);
+    // writeln(settings.iterations, " ", settings.fCalls, " ", settings.gCalls, " x = ", x);
 
     assert(nrm2((x - [1, 1].sliced).slice) < 1e-8);
 
@@ -317,7 +329,7 @@ version(mir_optim_test)
 
     settings.optimize!(rosenbrockRes, rosenbrockJac)(2, x, l, u);
 
-    // writeln(settings.iterCt, " ", settings.fCalls, " ", settings.gCalls, " ", x);
+    // writeln(settings.iterations, " ", settings.fCalls, " ", settings.gCalls, " ", x);
     assert(nrm2((x - [10, 100].sliced).slice) < 1e-5);
     assert(x.all!"a >= 10");
 }
@@ -387,7 +399,7 @@ version(mir_optim_test)
     // import std.stdio;
 
     // writeln(x);
-    // writeln(settings.iterCt, " ", settings.fCalls, " ", settings.gCalls);
+    // writeln(settings.iterations, " ", settings.fCalls, " ", settings.gCalls);
 
     settings = settings.init;
     x[] = [5.0, 5.0, 5.0];
@@ -399,7 +411,7 @@ version(mir_optim_test)
     assert(x.all!"a <= b"(u));
 
     // writeln(x);
-    // writeln(settings.iterCt, " ", settings.fCalls, " ", settings.gCalls);
+    // writeln(settings.iterations, " ", settings.fCalls, " ", settings.gCalls);
 }
 
 ///
@@ -444,7 +456,7 @@ Params:
     settings = Levenberg-Marquardt data structure
 See_also: $(LREF optimize)
 +/
-LeastSquaresResult!T optimizeImpl(alias f, alias g = null, alias tm = null, T)(
+LeastSquaresResult!T optimizeLeastSquares(alias f, alias g = null, alias tm = null, T)(
     scope ref LeastSquaresSettings!T settings,
     size_t m,
     Slice!(T*) x,
@@ -515,10 +527,16 @@ string leastSquaresStatusString(LeastSquaresStatus st) @safe pure nothrow @nogc
 {
     final switch(st) with(LeastSquaresStatus)
     {
-        case success:
-            return "success";
-        case initialized:
-            return "data structure was initialized";
+        case furtherImprovement:
+            return "The algorithm cann't improve the solution";
+        case maxIterations:
+            return "Maximum number of iterations reached";
+        case xConverged:
+            return "X converged";
+        case gConverged:
+            return "Jacobian converged";
+        case fConverged:
+            return "Residual is small enough";
         case badBounds:
             return "Initial guess must be within bounds.";
         case badGuess:
@@ -532,7 +550,7 @@ string leastSquaresStatusString(LeastSquaresStatus st) @safe pure nothrow @nogc
         case badLambdaParams:
             return "1 <= lambdaIncrease && lambdaIncrease <= T.max.sqrt and T.min_normal.sqrt <= lambdaDecrease && lambdaDecrease <= 1 must hold.";
         case numericError:
-            return "numeric error";
+            return "Numeric Error";
     }
 }
 
@@ -910,7 +928,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
     f(x, y);
     ++fCalls;
     residual = dot(y, y);
-    fConverged = residual <= maxGoodResidual;
+    bool fConverged = residual <= maxGoodResidual;
 
 
     bool needJacobian = true;
@@ -921,15 +939,23 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
     import core.stdc.stdio;
 
     lambda = 0;
-    iterCt = 0;
+    iterations = 0;
     T deltaX_dot;
     T mu = 1;
     enum T suspiciousMu = 16;
+    status = LeastSquaresStatus.maxIterations;
     do
     {
-        if (lambda > maxLambda || fConverged)
+        if (fConverged)
+        {
+            status = LeastSquaresStatus.fConverged;
             break;
-
+        }
+        if (!(lambda <= maxLambda))
+        {
+            status = LeastSquaresStatus.furtherImprovement;
+            break;
+        }
         if (mu > suspiciousMu && age)
         {
             needJacobian = true;
@@ -939,7 +965,8 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
         if (!allLessOrEqual(x, x))
         {
             cast(void) assumePure(&printf)("\n@@@@\nX != X\n@@@@\n");
-            status = LeastSquaresStatus.numericError; return ret;
+            status = LeastSquaresStatus.numericError;
+            break;
         }
         if (needJacobian)
         {
@@ -967,8 +994,6 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
                     tm(n, (uint totalThreads, uint threadId, uint j)
                         @trusted pure nothrow @nogc
                         {
-                            import mir.blas;
-                            import mir.math.common;
                             auto idx = totalThreads >= n ? j : threadId;
                             auto p = JJ[idx];
                             if (iwork[idx]++ == 0)
@@ -1000,14 +1025,13 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
                 }
             }
             gemv(1, J.transposed, y, 0, Jy);
-            gConverged = !(Jy[Jy.iamax].fabs > tolG);
-            if (gConverged)
+            if (!(Jy[Jy.iamax].fabs > gradTolerance))
             {
                 if (age == 0)
                 {
+                    status = LeastSquaresStatus.gConverged;
                     break;
                 }
-                gConverged = false;
                 age = maxAge;
                 continue;
             }
@@ -1031,13 +1055,30 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
         if (qpSettings.solveBoxQP(JJ.canonical, Jy, qpl, qpu, deltaX, false, qpwork, iwork, false) != BoxQPStatus.solved)
         {
             cast(void) assumePure(&printf)("\n@@@@\n error in solveBoxQP\n@@@@\n");
-            { status = LeastSquaresStatus.numericError; return ret; }
+            status = LeastSquaresStatus.numericError;
+            break;
+        }
+
+        if (!allLessOrEqual(deltaX, deltaX))
+        {
+            cast(void) assumePure(&printf)("\n@@@@\ndX != dX\n@@@@\n");
+            status = LeastSquaresStatus.numericError;
+            break;
         }
 
         copy(nBuffer, JJ.diagonal);
 
         axpy(1, x, deltaX);
         axpy(-1, x, deltaX);
+
+        auto newDeltaX_dot = dot(deltaX, deltaX);
+
+        if (!(newDeltaX_dot.sqrt < maxStep))
+        {
+            lambda *= lambdaIncrease * mu;
+            mu *= 2;
+            continue;
+        }
 
         copy(deltaX, nBuffer);
         axpy(1, x, nBuffer);
@@ -1051,7 +1092,8 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
         if (!(trialResidual <= T.infinity))
         {
             cast(void) assumePure(&printf)("\n@@@@\n trialResidual = %e\n@@@@\n", trialResidual);
-            { status = LeastSquaresStatus.numericError; return ret; }
+            status = LeastSquaresStatus.numericError;
+            break;
         }
 
         auto improvement = residual - trialResidual;
@@ -1059,27 +1101,24 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
         {
             lambda *= lambdaIncrease * mu;
             mu *= 2;
-            if (lambda <= maxLambda)
-                continue;
-            break; // further impovement
+            continue;
         }
 
         needJacobian = true;
         mu = 1;
-        iterCt++;
-        // if (!(deltaX_dot <= 1 - T.epsilon))
-        // return status = LeastSquaresStatus.numericError;     { ret; }
+        iterations++;
         copy(nBuffer, x);
         swap(mBuffer, y);
         residual = trialResidual;
         fConverged = residual <= maxGoodResidual;
-        deltaX_dot = dot(deltaX, deltaX);
+        deltaX_dot = newDeltaX_dot;
 
         symv(Uplo.Lower, 1, JJ, deltaX, 2, Jy); // use Jy as temporal storage
         auto predictedImprovement = -dot(Jy, deltaX);
 
         if (!(predictedImprovement > 0))
         {
+            status = LeastSquaresStatus.furtherImprovement;
             break;
         }
 
@@ -1096,22 +1135,20 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
             lambda = fmax(lambdaDecrease * lambda * mu, minLambda);
         }
 
-        xConverged = !(deltaX_dot.sqrt > tolX);// fmax(tolX, tolX * x.nrm2));
-        if (xConverged)
+        // fmax(tolX, tolX * x.nrm2));
+        if (!(deltaX_dot.sqrt > absTolerance && x.nrm2 > deltaX_dot.sqrt * relTolerance))
         {
             if (age == 0)
             {
+                status = LeastSquaresStatus.xConverged;
                 break;
             }
-            xConverged = false;
             age = maxAge;
             continue;
         }
     }
-    while (iterCt < maxIter);
-
-    { status = LeastSquaresStatus.success; return ret; }
-}}
+    while (iterations < maxIterations);
+} return ret; }
 
 pragma(inline, false)
 void fill(T, SliceKind kind)(T value, Slice!(T*, 1, kind) x)
