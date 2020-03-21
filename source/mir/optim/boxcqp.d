@@ -30,6 +30,9 @@ enum BoxQPStatus
     maxIterations,
 }
 
+// ? Not compatible with Intel MKL _posvx
+// version = boxcqp_compact;
+
 extern(C) @safe nothrow @nogc
 {
     /++
@@ -37,7 +40,10 @@ extern(C) @safe nothrow @nogc
     @safe pure nothrow @nogc
     size_t mir_box_qp_work_length(size_t n)
     {
-        return n * n + n * 8;
+        version(boxcqp_compact)
+            return n ^^ 2 + n * 8;
+        else
+            return n ^^ 2 * 2 + n * 8;
     }
 
     /++
@@ -143,11 +149,9 @@ in {
     assert(iwork.length >= mir_box_qp_iwork_length(n));
 }
 do {
-    import mir.algorithm.iteration: eachUploPair;
     import mir.blas: dot, copy;
     import mir.lapack: posvx;
     import mir.math.sum;
-    import mir.ndslice.mutation: copyMinor;
     import mir.ndslice.slice: sliced;
     import mir.ndslice.topology: canonical, diagonal;
 
@@ -175,14 +179,25 @@ do {
         auto lapackWorkSpace = buffer[0 .. n * 3]; buffer = buffer[n * 3 .. $];
         auto F = buffer[0 .. n ^^ 2].sliced(n, n); buffer = buffer[n ^^ 2 .. $];
 
+        version(boxcqp_compact)
+        {
+            foreach(i; 1 .. n)
+                copy(P[i, 0 .. i], P[0 .. i, i]);
+            copy(P.diagonal, Pdiagonal);
+            alias A = P;
+        }
+        else
+        {
+            auto A = buffer[0 .. n ^^ 2].sliced(n, n); buffer = buffer[n ^^ 2 .. $];
+            foreach(i; 0 .. n)
+                copy(P[i, 0 .. i + 1], A[0 .. i + 1, i]);
+        }
 
+        b[] = -q;
         char equed;
         T rcond, ferr, berr;
-        P.eachUploPair!("a = b", false);
-        copy(P.diagonal, Pdiagonal);
-        b[] = -q;
         auto info = posvx('E', 'L',
-            P.canonical,
+            A.canonical,
             F.canonical,
             equed,
             scaling,
@@ -193,7 +208,11 @@ do {
             berr,
             lapackWorkSpace,
             iwork);
-        copy(Pdiagonal, P.diagonal);
+
+        version(boxcqp_compact)
+        {
+            copy(Pdiagonal, P.diagonal);
+        }
 
         if (info != 0 && info != n + 1)
             return BoxQPStatus.numericError;
@@ -259,7 +278,11 @@ Start:
                 auto b = buffer[0 .. s]; buffer = buffer[s .. $];
                 auto lapackWorkSpace = buffer[0 .. s * 3]; buffer = buffer[s * 3 .. $];
                 auto F = buffer[0 .. s ^^ 2].sliced(s, s); buffer = buffer[s ^^ 2 .. $];
-                auto A = P[0 .. $ - 1, 1 .. $][$ - s .. $, $ - s .. $];
+
+                version(boxcqp_compact)
+                    auto A = P[0 .. $ - 1, 1 .. $][$ - s .. $, $ - s .. $];
+                else
+                    auto A = buffer[0 .. s ^^ 2].sliced(s, s); buffer = buffer[s ^^ 2 .. $];
 
                 foreach (ii, i; SIWorkspace.field)
                 {

@@ -630,7 +630,7 @@ extern(C) @safe nothrow @nogc
     size_t mir_least_squares_work_length(size_t m, size_t n)
     {
         import mir.optim.boxcqp: mir_box_qp_work_length;
-        return mir_box_qp_work_length(n) + n * 5 + n * n + n * m + m * 2;
+        return mir_box_qp_work_length(n) + n * 5 + n ^^ 2 + n * m + m * 2;
     }
 
     /++
@@ -885,7 +885,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
     auto Jy = work[0 .. n]; work = work[n .. $];
     auto nBuffer = work[0 .. n]; work = work[n .. $];
 
-    auto JJ = work[0 .. n * n].sliced(n, n); work = work[n * n .. $];
+    auto JJ = work[0 .. n ^^ 2].sliced(n, n); work = work[n ^^ 2 .. $];
     auto J = work[0 .. m * n].sliced(m, n); work = work[m * n .. $];
 
     auto y = work[0 .. m]; work = work[m .. $];
