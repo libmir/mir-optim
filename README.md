@@ -1,4 +1,3 @@
-[![Gitter](https://img.shields.io/gitter/room/libmir/public.svg)](https://gitter.im/libmir/public)
 [![Build Status](https://travis-ci.org/libmir/mir-optim.svg?branch=master)](https://travis-ci.org/libmir/mir-optim)
 [![Dub downloads](https://img.shields.io/dub/dt/mir-optim.svg)](http://code.dlang.org/packages/mir-optim)
 [![Dub downloads](https://img.shields.io/dub/dm/mir-optim.svg)](http://code.dlang.org/packages/mir-optim)
