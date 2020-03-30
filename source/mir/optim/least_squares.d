@@ -277,8 +277,8 @@ version(mir_optim_test)
 @safe unittest
 {
     import mir.algorithm.iteration: all;
-    import mir.ndslice.allocation: Slice, slice;
-    import mir.ndslice.slice: sliced;
+    import mir.ndslice.allocation: slice;
+    import mir.ndslice.slice: Slice, sliced;
     import mir.blas: nrm2;
 
     LeastSquaresSettings!double settings;
