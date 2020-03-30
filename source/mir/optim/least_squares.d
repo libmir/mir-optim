@@ -690,11 +690,11 @@ extern(C) @safe nothrow @nogc
         l = lower X bound
         u = upper X bound
         f = `n -> m` function
-        fContext = f context
+        fContext = `f` context
         g = `m × n` Jacobian (optional)
-        gContext = g context
+        gContext = `g` context
         tm = thread manager for finite difference jacobian approximation in case of g is null (optional)
-        tContextm = tm context
+        tmContext = `tm` context
         work = floating point workspace length of at least $(LREF mir_least_squares_work_length)
         iwork = floating point workspace length of at least $(LREF mir_least_squares_iwork_length)
     +/
