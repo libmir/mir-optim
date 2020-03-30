@@ -450,6 +450,9 @@ Params:
     g = `m × n` Jacobian (optional)
     tm = thread manager for finite difference jacobian approximation in case of g is null (optional)
     settings = Levenberg-Marquardt data structure
+    x = initial (in) and final (out) X value
+    l = lower X bound
+    u = upper X bound
 See_also: $(LREF optimize)
 +/
 LeastSquaresResult!T optimizeLeastSquares(alias f, alias g = null, alias tm = null, T)(
