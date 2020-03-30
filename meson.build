@@ -61,7 +61,7 @@ this_dep = declare_dependency(
     dependencies: required_deps,
 )
 
-test_versions = []
+test_versions = ['mir_optim_test']
 
 if has_cpp_headers
     install_subdir('include/',
