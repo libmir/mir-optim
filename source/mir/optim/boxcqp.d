@@ -383,6 +383,8 @@ version(mir_optim_test)
 unittest
 {
     import mir.ndslice;
+    import mir.algorithm.iteration;
+    import mir.math.common;
 
     auto P = [
         [ 2.0, -1, 0],
@@ -396,7 +398,7 @@ unittest
     auto x = slice!double(q.length);
 
     solveBoxQP(P, q, l, u, x);
-    assert(x == [-0.5, 2, 1]);
+    assert(x.equal!approxEqual([-0.5, 2, 1]));
 }
 
 package(mir) void applyBounds(T)(Slice!(T*) x, Slice!(const(T)*) l, Slice!(const(T)*) u)
