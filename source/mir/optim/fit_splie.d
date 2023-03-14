@@ -19,7 +19,7 @@ Params:
     x = fixed X values of the spline
     l = lower bounds for spline(X) values
     u = upper bounds for spline(X) values
-    lambda = coefficient for the integral of the square of the second derivative
+    lambda = coefficient for the normalized integral of the square of the second derivative
     configuration = spline configuration (optional)
 Returns: $(FitSplineResult)
 +/
@@ -76,7 +76,7 @@ FitSplineResult!T fitSpline(alias d = "a - b", T)(
             }
             assert(integral >= 0);
         }
-        y[$ - 1] = sqrt(integral * lambda / 3);
+        y[$ - 1] = sqrt(integral * lambda * points.length / (3 * x.length));
     };
 
     ret.leastSquaresResult = optimize!(f)(settings, points.length + !lambda, y[].sliced, l[].sliced, u[].sliced);
@@ -120,20 +120,20 @@ unittest
     foreach (i; 0 .. x.length)
         result.spline(x[i]).shouldApprox == y[i];
 
-    result = settings.fitSpline(points, x, l, u, 1);
+    result = settings.fitSpline(points, x, l, u, 1e-3);
 
     // this case sensetive for numeric noise
     y = [
-        0.1971683531479794,
-        5.936895050720581,
-        7.451651002121712,
-        5.122509287945581,
-        11.908292461047825,
-        13.701350302891292,
-        16.97948422229589,
-        7.868130112291985,
-        16.20637990062554,
-        19.58302823176968,
+        15.898984945597563,
+        0.44978154774119194,
+        15.579636654078188,
+        4.028312405287987,
+        9.945895290402778,
+        15.07778815727665,
+        18.877926155854535,
+        5.348699237978274,
+        16.898507797404278,
+        22.024920998359942,
     ];
 
     foreach (i; 0 .. x.length)
