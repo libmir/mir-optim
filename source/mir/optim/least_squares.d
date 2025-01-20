@@ -446,8 +446,8 @@ The function `g` is the Jacobian of `f`, and should fill a row-major `m x n` mat
 
 Returns: optimization status.
 Params:
-    f = `n -> m` function
-    g = `m × n` Jacobian (optional)
+    f = `n -> m` function, the `y` vector is zero initialized before f is called
+    g = `m × n` Jacobian (optional), the `J` matrix is zero initialized before g is called
     tm = thread manager for finite difference jacobian approximation in case of g is null (optional)
     settings = Levenberg-Marquardt data structure
     m = length (dimension) of `y = f(x)`
@@ -466,6 +466,7 @@ LeastSquaresResult!T optimizeLeastSquares(alias f, alias g = null, alias tm = nu
 {
     scope fInst = delegate(Slice!(const(T)*) x, Slice!(T*) y)
     {
+        y[] = 0;
         f(x, y);
     };
     if (false)
@@ -478,6 +479,7 @@ LeastSquaresResult!T optimizeLeastSquares(alias f, alias g = null, alias tm = nu
     {
         scope gInst = delegate(Slice!(const(T)*) x, Slice!(T*, 2) J)
         {
+            J[] = 0;
             g(x, J);
         };
         static if (isNullableFunction!(g))
@@ -902,7 +904,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
 
     debug
     {
-        work[] = 0;
+        work[] = T.nan;
         iwork[] = 0;
     }
 
