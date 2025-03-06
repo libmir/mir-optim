@@ -74,6 +74,8 @@ alias LeastSquaresFunction(T) = void delegate(Slice!(const(T)*) x, Slice!(T*) y)
 /// ditto
 alias LeastSquaresJacobian(T) = void delegate(Slice!(const(T)*) x, Slice!(T*, 2) J) @safe nothrow @nogc pure;
 
+alias LeastSquaresOnComplete(T) = void delegate(Slice!(const(T)*) y, Slice!(const(T)*, 2) J) @safe nothrow @nogc pure;
+
 /// Delegates for low level C API.
 alias LeastSquaresFunctionBetterC(T) = extern(C) void function(scope void* context, size_t m, size_t n, const(T)* x, T* y) @system nothrow @nogc pure;
 ///
@@ -162,7 +164,7 @@ Params:
     taskPool = task Pool with `.parallel` method for finite difference jacobian approximation in case of g is null (optional)
 See_also: $(LREF optimizeLeastSquares)
 +/
-LeastSquaresResult!T optimize(alias f, alias g = null, alias tm = null, T)(
+LeastSquaresResult!T optimize(alias f, alias g = null, alias onComplete = null, alias tm = null, T)(
     scope const ref LeastSquaresSettings!T settings,
     size_t m,
     Slice!(T*) x,
@@ -171,7 +173,7 @@ LeastSquaresResult!T optimize(alias f, alias g = null, alias tm = null, T)(
 )
     if ((is(T == float) || is(T == double)))
 {
-    auto ret = optimizeLeastSquares!(f, g, tm, T)(settings, m, x, l, u);
+    auto ret = optimizeLeastSquares!(f, g, onComplete, tm, T)(settings, m, x, l, u);
     if (ret.status == -1)
         throw leastSquaresException_maxIterations;
     else
@@ -456,7 +458,7 @@ Params:
     u = upper X bound
 See_also: $(LREF optimize)
 +/
-LeastSquaresResult!T optimizeLeastSquares(alias f, alias g = null, alias tm = null, T)(
+LeastSquaresResult!T optimizeLeastSquares(alias f, alias g = null, alias onComplete = null, alias tm = null, T)(
     scope const ref LeastSquaresSettings!T settings,
     size_t m,
     Slice!(T*) x,
@@ -492,6 +494,24 @@ LeastSquaresResult!T optimizeLeastSquares(alias f, alias g = null, alias tm = nu
         }
     }
 
+    static if (is(typeof(onComplete) == typeof(null)))
+        enum LeastSquaresOnComplete!T onCompleteInst = null;
+    else
+    {
+        scope onCompleteInst = delegate(Slice!(const(T)*) y, Slice!(const(T)*, 2) J)
+        {
+            onComplete(y, J);
+        };
+        static if (isNullableFunction!(onComplete))
+            if (!onComplete)
+                onCompleteInst = null;
+        if (false)
+        {
+            Slice!(const(T)*, 2) J;
+            onCompleteInst(Slice!(const(T)*)(), J);
+        }
+    }
+
     static if (is(typeof(tm) == typeof(null)))
         enum LeastSquaresThreadManager tmInst = null;
     else
@@ -515,7 +535,7 @@ LeastSquaresResult!T optimizeLeastSquares(alias f, alias g = null, alias tm = nu
     auto iwork = rcslice!lapackint(mir_least_squares_iwork_length(m, n));
     auto workS = work.lightScope;
     auto iworkS = iwork.lightScope;
-    return optimizeLeastSquares!T(settings, m, x, l, u, workS, iworkS, fInst.trustedAllAttr, gInst.trustedAllAttr, tmInst.trustedAllAttr);
+    return optimizeLeastSquares!T(settings, m, x, l, u, workS, iworkS, fInst.trustedAllAttr, gInst.trustedAllAttr, onCompleteInst.trustedAllAttr, tmInst.trustedAllAttr);
 }
 
 /++
@@ -603,10 +623,11 @@ LeastSquaresResult!double optimizeLeastSquaresD
         Slice!(lapackint*) iwork,
         scope LeastSquaresFunction!double f,
         scope LeastSquaresJacobian!double g = null,
+        scope LeastSquaresOnComplete!double onComplete = null,
         scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
-    return optimizeLeastSquaresImplGeneric!double(settings, m, x, l, u, work, iwork, f, g, tm);
+    return optimizeLeastSquaresImplGeneric!double(settings, m, x, l, u, work, iwork, f, g, onComplete, tm);
 }
 
 
@@ -623,10 +644,11 @@ LeastSquaresResult!float optimizeLeastSquaresS
         Slice!(lapackint*) iwork,
         scope LeastSquaresFunction!float f,
         scope LeastSquaresJacobian!float g = null,
+        scope LeastSquaresOnComplete!float onComplete = null,
         scope LeastSquaresThreadManager tm = null,
     ) @trusted nothrow @nogc pure
 {
-    return optimizeLeastSquaresImplGeneric!float(settings, 2, x, l, u, work, iwork, f, g, tm);
+    return optimizeLeastSquaresImplGeneric!float(settings, 2, x, l, u, work, iwork, f, g, onComplete, tm);
 }
 
 /// ditto
@@ -831,6 +853,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGenericBetterC(T)
             iwork,
             (x, y) @trusted => f(fContext, y.length, x.length, x.iterator, y.iterator),
             (x, J) @trusted => g(gContext, J.length, x.length, x.iterator, J.iterator),
+            null,
             null
         );
 
@@ -850,6 +873,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGenericBetterC(T)
             iwork,
             (x, y) @trusted => f(fContext, y.length, x.length, x.iterator, y.iterator),
             null,
+            null,
             (count, scope LeastSquaresTask task) @trusted => tm(tmContext, count, task, taskFunction)
         );
     return optimizeLeastSquares!T(
@@ -861,6 +885,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGenericBetterC(T)
         work,
         iwork,
         (x, y) @trusted => f(fContext, y.length, x.length, x.iterator, y.iterator),
+        null,
         null,
         null
     );
@@ -885,6 +910,7 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
         Slice!(lapackint*) iwork,
         scope LeastSquaresFunction!T f,
         scope LeastSquaresJacobian!T g,
+        scope LeastSquaresOnComplete!T onComplete,
         scope LeastSquaresThreadManager tm,
     ) @trusted nothrow @nogc pure
 { typeof(return) ret; with(ret) with(settings){
@@ -924,6 +950,11 @@ LeastSquaresResult!T optimizeLeastSquaresImplGeneric(T)
     auto qpu = work[0 .. n]; work = work[n .. $];
 
     auto qpwork = work;
+
+    scope(exit){
+        if(onComplete)
+            onComplete(y, J);
+    }
 
     version(LDC) pragma(inline, true);
 
