@@ -45,7 +45,7 @@ FitSplineResult!T fitSpline(alias d = "a - b", T)(
     if (points.length < x.length && lambda == 0)
     {
         static immutable exc = new Exception("fitSpline: points.length has to be greater or equal x.length when lambda is 0.0");
-        throw exc;
+        throw cast()exc;
     }
 
     FitSplineResult!T ret;

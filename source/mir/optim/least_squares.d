@@ -173,10 +173,10 @@ LeastSquaresResult!T optimize(alias f, alias g = null, alias tm = null, T)(
 {
     auto ret = optimizeLeastSquares!(f, g, tm, T)(settings, m, x, l, u);
     if (ret.status == -1)
-        throw leastSquaresException_maxIterations;
+        throw cast()leastSquaresException_maxIterations;
     else
     if (ret.status < -1)
-        throw leastSquaresExceptions[ret.status + 32];
+        throw cast()leastSquaresExceptions[ret.status + 32];
     return ret;
 }
 
