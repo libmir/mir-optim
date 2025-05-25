@@ -151,7 +151,7 @@ algorithm, and an estimate of the Jacobian of `f` at x.
 The function `f` should take an input vector of length `n`, and fill an output
 vector of length `m`.
 
-The function `g` is the Jacobian of `f`, and should fill a row-major `m x n` matrix. 
+The function `g` is the Jacobian of `f`, and should fill a row-major `m x n` matrix.
 
 Throws: $(LREF LeastSquaresException)
 Params:
@@ -442,7 +442,7 @@ algorithm, and an estimate of the Jacobian of `f` at x.
 The function `f` should take an input vector of length `n`, and fill an output
 vector of length `m`.
 
-The function `g` is the Jacobian of `f`, and should fill a row-major `m x n` matrix. 
+The function `g` is the Jacobian of `f`, and should fill a row-major `m x n` matrix.
 
 Returns: optimization status.
 Params:
@@ -1201,7 +1201,7 @@ uint normalizeSafety()(uint attrs)
 auto trustedAllAttr(T)(scope return T t) @trusted
     if (isFunctionPointer!T || isDelegate!T)
 {
-    enum attrs = (functionAttributes!T & ~FunctionAttribute.system) 
+    enum attrs = (functionAttributes!T & ~FunctionAttribute.system)
         | FunctionAttribute.pure_
         | FunctionAttribute.safe
         | FunctionAttribute.nogc

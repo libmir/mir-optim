@@ -29,7 +29,7 @@ jobs:
           const compilers = {"windows": [], "macos": [], "ubuntu": []};
           const {owner, repo} = context.repo;
           let commit_sha = context.sha;
-          if (context.eventName == "pull_request") 
+          if (context.eventName == "pull_request")
           {
             commit_sha = context.payload.pull_request.head.sha;
           }
@@ -75,11 +75,11 @@ jobs:
       matrix:
         dc: ${{ fromJSON(needs.setup.outputs.compilers).macos }}
     steps:
-      - name: Checkout repo 
+      - name: Checkout repo
         uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579
         with:
           fetch-depth: 0
-      - name: Setup D compiler 
+      - name: Setup D compiler
         uses: dlang-community/setup-dlang@763d869b4d67e50c3ccd142108c8bca2da9df166
         with:
           compiler: ${{ matrix.dc }}
@@ -112,17 +112,17 @@ jobs:
     env:
       # Ubuntu no longer has a 32-bit version of LAPACK available, so
       # we have to drop support. :(
-      ARCH: x86_64 
+      ARCH: x86_64
     strategy:
       fail-fast: false
       matrix:
         dc: ${{ fromJSON(needs.setup.outputs.compilers).ubuntu }}
     steps:
-      - name: Checkout repo 
+      - name: Checkout repo
         uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579
         with:
           fetch-depth: 0
-      - name: Setup D compiler 
+      - name: Setup D compiler
         uses: dlang-community/setup-dlang@763d869b4d67e50c3ccd142108c8bca2da9df166
         with:
           compiler: ${{ matrix.dc }}
@@ -137,13 +137,13 @@ jobs:
           key: ubuntu-latest-build-${{ hashFiles('**/dub.sdl', '**/dub.json') }}
           restore-keys: |
             ubuntu-latest-build-
-      - name: Build / test 
+      - name: Build / test
         run: |
           dub test --arch=$ARCH --build=unittest-cov -c unittest-blas
         shell: bash
       - name: Upload coverage data
         uses: codecov/codecov-action@f32b3a3741e1053eb607407145bc9619351dc93b
-  
+
   windows:
     name: '[windows] x86_64/${{ matrix.dc }}'
     runs-on: windows-latest
@@ -158,11 +158,11 @@ jobs:
       matrix:
         dc: ${{ fromJSON(needs.setup.outputs.compilers).windows }}
     steps:
-      - name: Checkout repo 
+      - name: Checkout repo
         uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579
         with:
           fetch-depth: 0
-      - name: Setup D compiler 
+      - name: Setup D compiler
         uses: dlang-community/setup-dlang@763d869b4d67e50c3ccd142108c8bca2da9df166
         with:
           compiler: ${{ matrix.dc }}
@@ -189,5 +189,3 @@ jobs:
         shell: bash
       - name: Upload coverage data
         uses: codecov/codecov-action@f32b3a3741e1053eb607407145bc9619351dc93b
-    
-        
