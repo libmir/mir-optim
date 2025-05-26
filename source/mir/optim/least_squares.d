@@ -173,10 +173,10 @@ LeastSquaresResult!T optimize(alias f, alias g = null, alias tm = null, T)(
 {
     auto ret = optimizeLeastSquares!(f, g, tm, T)(settings, m, x, l, u);
     if (ret.status == -1)
-        throw cast()leastSquaresException_maxIterations;
+        () @trusted { throw cast()leastSquaresException_maxIterations; }();
     else
     if (ret.status < -1)
-        throw cast()leastSquaresExceptions[ret.status + 32];
+        () @trusted { throw cast()leastSquaresExceptions[ret.status + 32]; }();
     return ret;
 }
 
@@ -207,10 +207,10 @@ LeastSquaresResult!T optimize(alias f, TaskPool, T)(
 
     auto ret = optimizeLeastSquares!(f, null, tm, T)(settings, m, x, l, u);
     if (ret.status == -1)
-        throw leastSquaresException_maxIterations;
+        () @trusted { throw cast()leastSquaresException_maxIterations; }();
     else
     if (ret.status < -1)
-        throw leastSquaresExceptions[ret.status + 32];
+        () @trusted { throw cast()leastSquaresExceptions[ret.status + 32]; }();
     return ret;
 }
 
